@@ -1,5 +1,5 @@
 
-
+# script purpose: getting acquainted with dlnm functions
 
 library(dlnm)
 
@@ -21,3 +21,15 @@ cb1.pm <- crossbasis(chicagoNMMAPS$pm10,
 
 cb1.temp <- crossbasis(chicagoNMMAPS$temp, lag = 3, argvar = list(df = 5), #
                        arglag = list(fun = "strata", breaks = 1))
+
+summary(cb1.pm)
+summary(cb1.temp)
+# this describes the crossbasis functions and basis for the predictor and lag
+
+library(splines)
+model1 <- glm(death ~ cb1.pm + cb1.temp + ns(time, 7*14) + dow,
+                family=quasipoisson(), chicagoNMMAPS)
+
+pred1.pm <- crosspred(cb1.pm, model1, at=0:20, bylag=0.2, cumul=TRUE)
+
+
