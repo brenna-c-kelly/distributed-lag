@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r, include=FALSE}
 
 library(gnm)
 library(lme4)
@@ -49,7 +49,7 @@ case <- case |>
 # constructing the composite outcome > outcomes related to placental insufficiency
 case$pl_insuf <- case_when(case$sga10_by_sex > case$birthweightgrams ~ 1, # sga
                            case$hypertension %in% c("H", "E", "P") ~ 1)
-                           # case$placenta_abr == 1 ~ 1)
+# case$placenta_abr == 1 ~ 1)
 case$pl_insuf <- ifelse(is.na(case$pl_insuf), 0, 1)
 
 case <- case[, c("grid_id",  "momid", "birth_week",
@@ -85,42 +85,375 @@ preg_exp <- merge(grid_weeks, aq,
                   by.y = c("grid_id", "week")) |>
   select(-c("V1"))
 
-
 ## plots
 preg_exp$pregnancy_week <- gsub("week_", "", preg_exp$date_type)
 
 early_preg_exp <- preg_exp |>
   mutate(pregnancy_week = as.numeric(pregnancy_week)) |>
   filter(pregnancy_week <= 25)
+
 ```
 
 
+### Max PM2.5  
 
-```{r}
+```{r max pm2.5}
+
 ## build the cross-basis of pm
-cb1.pm <- crossbasis(early_preg_exp$max_pm, 
-                     lag = 25, 
-                     argvar = list(fun="ns", knots = 3), 
-                     arglag = list(fun="ns", knots = 3))
-summary(cb1.pm)
+cb1.pm.max <- crossbasis(early_preg_exp$max_pm, 
+                         lag = 25, 
+                         argvar = list(fun="ns", knots = 3), 
+                         arglag = list(fun="ns", knots = 3))
+summary(cb1.pm.max)
 
 ## pm
-m <- glm(pl_insuf ~ 1 + cb1.pm, # (1 | week)
-         data = early_preg_exp, family = "binomial")
+m_pm_max <- glm(pl_insuf ~ 1 + cb1.pm.max, # (1 | week)
+                data = early_preg_exp, family = "binomial")
 
-pred1.pm <- crosspred(cb1.pm, m, at = 0:200,#0.27:199, 
-                      bylag = 1, cumul = TRUE, cen = mean(early_preg_exp$max_pm))
+pred1.pm.max <- crosspred(cb1.pm.max, m_pm_max, at = 0:200,#0.27:199, 
+                          bylag = 1, cumul = TRUE, cen = mean(early_preg_exp$max_pm))
 
-plot(pred1.pm, col = "darkblue")
+plot(pred1.pm.max, col = "darkblue", xlab = "Max pm2.5, µg/m³", ylab = "Lag from 25 (weeks)")
 
-pred1.pm <- crosspred(cb1.pm, m, at = 150, bylag = 1, cumul = TRUE, 
-                      cen = mean(early_preg_exp$mean_pm))
+pred1.pm.max <- crosspred(cb1.pm.max, m_pm_max, at = 200, bylag = 1, cumul = TRUE, 
+                          cen = mean(early_preg_exp$mean_pm))
 
-plot(pred1.pm, var = 150, xlim = c(0, 25), xlab = "Lag from 25 (weeks)", ylab = "OR for maxpm = 150",
-     ylim = c(0.9, 1.1), lab = c(8, 5, 5), col = 1, lwd = 1.5, ci = "area")
+plot(pred1.pm.max, var = 200, xlim = c(0, 25), xlab = "Lag from 25 (weeks)", ylab = "OR for 200 µg/m³",
+     ylim = c(0.9, 1.12), lab = c(8, 5, 5), col = 1, lwd = 1.5, ci = "area",
+     main = "max pm")
+
 ```
 
+#### Peak exposure intensity  
+Between 5-25 weeks' gestation, odds of placental insufficiency increase significantly beginning at 70 µg/m³, with effects peaking around week 12. Relative to exposure to average amounts of PM2.5, exposure to 100 µg/m³ increases odds of placental insufficiency by 4.5%. Exposure to the highest amounts, around 200 µg/m³, increases odds by 7.5%.  
 
-beginning at ~70 µg/m³, significant between 5-25 weeks' gestation
-relative to average exposure, exposure to 100 µg/m³ increases odds of placental insufficiency by 4.5%
-up to 7.5% greater odds of placental insufficiency; exposure 
+### Mean PM2.5  
+
+```{r}
+
+## build the cross-basis of pm
+cb1.pm.mean <- crossbasis(early_preg_exp$mean_pm, 
+                          lag = 25, 
+                          argvar = list(fun="ns", knots = 3), 
+                          arglag = list(fun="ns", knots = 3))
+summary(cb1.pm.mean)
+
+## pm
+m_pm_mean <- glm(pl_insuf ~ 1 + cb1.pm.mean, # (1 | week)
+                 data = early_preg_exp, family = "binomial")
+
+pred1.pm.mean <- crosspred(cb1.pm.mean, m_pm_mean, at = 0:110,#0.27:199, 
+                           bylag = 1, cumul = TRUE, cen = mean(early_preg_exp$mean_pm))
+
+plot(pred1.pm.mean, col = "blue", xlab = "Mean pm2.5, µg/m³", ylab = "Lag from 25 (weeks)")
+
+pred1.pm.mean <- crosspred(cb1.pm.mean, m_pm_mean, at = 105, bylag = 1, cumul = TRUE, 
+                           cen = mean(early_preg_exp$mean_pm))
+
+plot(pred1.pm.mean, var = 105, xlim = c(0, 25), xlab = "Lag from 25 (weeks)", ylab = "OR for 100 µg/m³",
+     ylim = c(0.9, 1.1), lab = c(8, 5, 5), col = 1, lwd = 1.5, ci = "area",
+     main = "mean pm")
+
+```
+
+#### Weekly cumulative exposure  
+Between 7-15 weeks' gestation, odds of placental insufficiency increase significantly beginning at 50 µg/m³, with effects peaking around week 11. The effect of higher weekly exposure, around 105 µg/m³, decreases with gestational age. Relative to exposure to average amounts of PM2.5, exposure to 105 µg/m³ increases odds of placental insufficiency by 4% around week 5.
+
+### Max NO2
+
+```{r}
+
+## no2
+cb1.no2_max <- crossbasis(early_preg_exp$max_no2, 
+                      lag = 25, 
+                      argvar = list(fun = "ns", knots = 3), 
+                      arglag = list(fun = "ns", knots = 3))
+summary(cb1.no2_max)
+
+m_no2_max <- glm(pl_insuf ~ 1 + cb1.no2_max, # (1 | week)
+                 data = early_preg_exp, family = "binomial")
+
+pred1.no2 <- crosspred(cb1.no2_max, m_no2_max, at=0.1:192, 
+                       bylag=1, cumul=TRUE,
+                       cen = mean(early_preg_exp$max_no2))
+
+plot(pred1.no2, col = "darkorange")
+
+pred1.no2 <- crosspred(cb1.no2_max, m_no2_max, at = 190, bylag = 1, cumul = TRUE,
+                       cen = mean(early_preg_exp$max_no2))
+
+plot(pred1.no2, var = 190, xlim = c(0, 25), xlab = "Lag (weeks)", 
+     ylab = "OR for 190 µg/m³",
+     ylim = c(0.95, 1.06), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "max NO2")
+
+pred1.no2 <- crosspred(cb1.no2_max, m_no2_max, at = 0.10, bylag = 1, cumul = TRUE,
+                       cen = mean(early_preg_exp$max_no2))
+
+plot(pred1.no2, var = 0.10, xlim = c(0, 25), xlab = "Lag (weeks)", 
+     ylab = "OR for 0 µg/m³",
+     ylim = c(0.95, 1.06), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "max NO2")
+
+```
+
+#### Peak exposure intensity  
+Relative to average exposure, exposure to the highest amounts of NO2 has a positive but *not significant* effect on placental insufficiency. In gestational week 25, there is a 5% increase in odds of placental insufficiency (not significant). However, exposure to no NO2 is significantly associated with 2% greater odds of placental insufficiency in weeks 18-25.
+
+### Mean NO2
+
+```{r}
+
+## no2
+cb1.no2.mean <- crossbasis(early_preg_exp$mean_no2, 
+                           lag = 25, 
+                           argvar = list(fun = "ns", knots = 3), 
+                           arglag = list(fun = "ns", knots = 3))
+summary(cb1.no2.mean)
+
+m_no2_mean <- glm(pl_insuf ~ 1 + cb1.no2.mean, # (1 | week)
+                  data = early_preg_exp, family = "binomial")
+
+pred1.no2 <- crosspred(cb1.no2.mean, m_no2_mean, at = 0.05:100, 
+                       bylag = 1, cumul = TRUE,
+                       cen = mean(early_preg_exp$mean_no2))
+
+plot(pred1.no2, col = "orange")
+
+pred1.no2 <- crosspred(cb1.no2.mean, m_no2_mean, at = 100, 
+                       bylag = 1, cumul = TRUE,
+                       cen = mean(early_preg_exp$mean_no2))
+
+plot(pred1.no2, var = 100, xlim = c(0, 25), xlab = "Lag (weeks)", 
+     ylab = "OR for 100 µg/m³",
+     ylim = c(0.95, 1.05), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "mean NO2")
+
+pred1.no2 <- crosspred(cb1.no2.mean, m_no2_mean, at = 0.5, 
+                       bylag = 1, cumul = TRUE,
+                       cen = mean(early_preg_exp$mean_no2))
+
+plot(pred1.no2, var = 0.5, xlim = c(0, 25), xlab = "Lag (weeks)", 
+     ylab = "OR for 0 µg/m³",
+     ylim = c(0.95, 1.05), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "mean NO2")
+
+```
+
+#### Weekly cumulative exposure  
+Relative to average exposure to NO2, exposure to 100 µg/m³ is associated  with greater odds of placental insufficiency in gestational weeks 18-22. In week 20, this exposure is associated with 2% greater odds of placental insufficiency. Additionally, in weeks 18-25, exposure to no NO2 is associated with about 2.5% greater odds of placental insufficiency.
+
+### Max temp
+
+```{r}
+
+## temp
+cb1.temp_max <- crossbasis(early_preg_exp$max_temp, 
+                       lag = 25, 
+                       arglag = list(fun = "ns", knots = 3),
+                       argvar = list(fun = "bs")) 
+summary(cb1.temp_max)
+
+m_temp_max <- glm(pl_insuf ~ 1 + cb1.temp_max,
+                  data = early_preg_exp, family = "binomial")
+
+summary(m_temp_max)
+pred1.temp <- crosspred(cb1.temp_max, m_temp_max, at = 251:301, 
+                        bylag = 1, cumul = TRUE,
+                        cen = mean(early_preg_exp$mean_temp))
+
+plot(pred1.temp, col = "darkred")
+
+pred1.temp <- crosspred(cb1.temp_max, m_temp_max, at = 251, bylag = 1, cumul = TRUE,
+                        cen = mean(early_preg_exp$mean_temp))
+
+plot(pred1.temp, var = 251, xlim = c(0, 20), xlab = "Lag (weeks)", ylab = "OR for 251 K",
+     ylim = c(0.9,1.1), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "max temp")
+
+```
+
+#### Peak exposure intensity  
+Relative to average exposure, exposure to higher temperatures are not statistically significantly associated with placental insufficiency. However, exposure to the lowest temperatures (Kelvin: 250) in gestational weeks 1-4 is associated with slightly higher odds of placental insufficiency. The effects peak in week 1, when this exposure is associated with 4% higher odds of placental insufficiency.  
+- Could be that low temperature is just capturing inversions
+
+### Mean temp
+
+```{r}
+
+## temp
+cb1.temp_mean <- crossbasis(early_preg_exp$mean_temp, 
+                       lag = 25, 
+                       arglag = list(fun = "ns", knots = 3),
+                       argvar = list(fun = "bs")) 
+summary(cb1.temp_mean)
+
+m_temp_mean <- glm(pl_insuf ~ 1 + cb1.temp_mean,
+                   data = early_preg_exp, family = "binomial")
+summary(m_temp_mean)
+
+pred1.temp <- crosspred(cb1.temp_mean, m_temp_mean, at = 246:298, 
+                        bylag = 1, cumul = TRUE, 
+                        cen = mean(early_preg_exp$mean_temp))
+
+plot(pred1.temp, col = "red")
+
+pred1.temp <- crosspred(cb1.temp_mean, m_temp_mean, at = 298, 
+                        bylag = 1, cumul = TRUE, 
+                        cen = mean(early_preg_exp$mean_temp))
+
+plot(pred1.temp, var = 298, xlim = c(0, 20), xlab = "Lag (weeks)", ylab = "OR for 298 K",
+     ylim = c(0.9,1.05), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "mean temp")
+
+
+pred1.temp <- crosspred(cb1.temp_mean, m_temp_mean, at = 246, 
+                        bylag = 1, cumul = TRUE, 
+                        cen = mean(early_preg_exp$mean_temp))
+
+plot(pred1.temp, var = 246, xlim = c(0, 20), xlab = "Lag (weeks)", ylab = "OR for 246 K",
+     ylim = c(0.9, 1.07), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "mean temp")
+
+```
+
+#### Weekly cumulative exposure  
+Relative to average temperature exposure, exposure to lower temperatures (Kelvin: 250) is significantly associated with greater odds of placental insufficiency. Effects are significant around gestational weeks 1-5 and 20-25, with peak effects at week 25. Odds of exposure to the lowest temperatures in week 25 are associated with 4.5% greater risk of placental insufficiency. Exposure in week 1 is associated with 2.5% greater risk of placental insufficiency.  
+Additionally, exposure to higher temperatures in these weeks is associated with lower odds of placental insufficiency. In week 25, exposure to the highest temperature (Kelvin: 298) is associated with 2.5% lower risk of placental insufficiency.
+
+
+### Max O3
+
+```{r}
+
+## o3
+cb1.o3_max <- crossbasis(early_preg_exp$max_o3, 
+                     lag = 25, 
+                     argvar = list(fun="bs"),
+                     arglag = list(fun="ns", knots = 3))
+summary(cb1.o3_max)
+
+m_o3_max <- glm(pl_insuf ~ 1 + cb1.o3_max, 
+                data = early_preg_exp, family = "binomial")
+summary(m_o3_max)
+
+pred1.o3 <- crosspred(cb1.o3_max, m_o3_max, at = 13.6:109, 
+                      bylag = 1, cumul= TRUE,
+                      cen = mean(early_preg_exp$max_o3))
+
+plot(pred1.o3, col = "darkolivegreen1")
+
+pred1.o3 <- crosspred(cb1.o3_max, m_o3_max, at = 40, bylag = 1, cumul = TRUE)
+
+plot(pred1.o3, var = 40, xlim = c(0, 20), xlab = "Lag (weeks)", ylab = "OR for 40 ppb",
+     ylim = c(0.9,1.1), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "max O3")
+
+
+```
+
+#### Peak exposure intensity  
+not significant  
+effect peaks around week 12 for lower amounts and around week 25 for higher amounts; it's not significant at any point or level
+
+### Mean O3
+
+```{r}
+
+## o3
+cb1.o3_mean <- crossbasis(early_preg_exp$mean_o3, 
+                     lag = 25, 
+                     argvar = list(fun="bs"),
+                     arglag = list(fun="ns", knots = 3))
+summary(cb1.o3_mean)
+
+m_o3_mean <- glm(pl_insuf ~ 1 + cb1.o3_mean, 
+                 data = early_preg_exp, family = "binomial")
+summary(m_o3_mean)
+
+pred1.o3 <- crosspred(cb1.o3_mean, m_o3_mean, at = 7.5:91,
+                      bylag = 1, cumul = TRUE,
+                      cen = mean(early_preg_exp$mean_o3))
+
+plot(pred1.o3, col = "darkolivegreen1")
+
+pred1.o3 <- crosspred(cb1.o3_mean, m_o3_mean, at = 90, 
+                      bylag = 1, cumul = TRUE,
+                      cen = mean(early_preg_exp$mean_o3))
+
+plot(pred1.o3, var = 90, xlim = c(0, 20), xlab = "Lag (weeks)", ylab = "OR for 90 ppb",
+     ylim = c(0.9,1.1), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area",
+     main = "mean O3")
+
+```
+
+#### Weekly cumulative exposure  
+At the highest exposure level, the effect of weekly mean ozone exposure was only significant during gestational weeks 17-19. Relative to average exposure, exposure to 90 ppb of O3 increases odds of placental insufficiency by 2.5% at gestational week 18.
+
+### Multiple pollutants (not mixtures), means
+
+```{r}
+
+m_all_mean <- glm(pl_insuf ~ 1 + cb1.temp_mean + cb1.o3_mean + 
+                    cb1.pm.mean + cb1.no2.mean,
+                  data = early_preg_exp, family = "binomial")
+
+pred1.o3 <- crosspred(cb1.o3_mean, m_all_mean, at = 7.5:91,
+                      bylag = 1, cumul = TRUE,
+                      cen = mean(early_preg_exp$mean_o3))
+pred1.temp <- crosspred(cb1.temp_mean, m_all_mean, at = 246:298, 
+                        bylag = 1, cumul = TRUE, 
+                        cen = mean(early_preg_exp$mean_temp))
+pred1.no2 <- crosspred(cb1.no2.mean, m_all_mean, at = 0.05:100, 
+                       bylag = 1, cumul = TRUE,
+                       cen = mean(early_preg_exp$mean_no2))
+pred1.pm.mean <- crosspred(cb1.pm.mean, m_all_mean, at = 0.2:103,#0.27:199, 
+                          bylag = 1, cumul = TRUE,
+                          cen = mean(early_preg_exp$max_pm))
+
+par(mfrow = c(2, 2))
+o3_plt <- plot(pred1.o3, col = "darkolivegreen1", main = "O3")
+temp_plt <- plot(pred1.temp, col = "red", main = "temp")
+no2_plt <- plot(pred1.no2, col = "orange", main = "NO2")
+pm_plt <- plot(pred1.pm.mean, col = "darkblue", main = "PM", 
+               xlab = "Max pm2.5, µg/m³", ylab = "Lag from 25 (weeks)")
+dev.off()
+
+
+```
+
+Here we've got the means of all the pollutants and temperature. This is not the mixture effect, but the effect of holding the other exposures constant at their mean. The relationships seen above ("univariate" cross-basis models) are somewhat modified. Interesting that the effect of low temperature is attenuated. The effect of high O3 exposure is amplified, particularly later in pregnancy (weeks 20-25). NO2 not be significant
+
+### Multiple pollutants (not mixtures), max
+
+```{r}
+
+m_all_max <- glm(pl_insuf ~ 1 + cb1.temp_max + cb1.o3_max + 
+                    cb1.pm.max + cb1.no2_max,
+                  data = early_preg_exp, family = "binomial")
+
+pred1.o3 <- crosspred(cb1.o3_max, m_all_max, at = 13.7:109,
+                      bylag = 1, cumul = TRUE,
+                      cen = mean(early_preg_exp$mean_o3))
+pred1.temp <- crosspred(cb1.temp_max, m_all_max, at = 251:301, 
+                        bylag = 1, cumul = TRUE, 
+                        cen = mean(early_preg_exp$mean_temp))
+pred1.no2 <- crosspred(cb1.no2_max, m_all_max, at = 0.2:192, 
+                       bylag = 1, cumul = TRUE,
+                       cen = mean(early_preg_exp$mean_no2))
+pred1.pm <- crosspred(cb1.pm.max, m_all_max, at = 0.27:199, 
+                          bylag = 1, cumul = TRUE,
+                          cen = mean(early_preg_exp$max_pm))
+
+par(mfrow = c(2, 2))
+o3_plt <- plot(pred1.o3, col = "darkolivegreen1", main = "O3")
+temp_plt <- plot(pred1.temp, col = "red", main = "temp")
+no2_plt <- plot(pred1.no2, col = "orange", main = "NO2")
+pm_plt <- plot(pred1.pm, col = "darkblue", main = "PM", 
+               xlab = "Max pm2.5, µg/m³", ylab = "Lag from 25 (weeks)")
+dev.off()
+
+```
+
+Incorporating all maximum exposures changes the relationships as well. The pollutants all have larger effect — up to 8% OR for PM, 4% for O3, 4.5% for NO2. This means, when exposed to even average amounts of other pollutants in combination with greater amounts of one pollutant, we see larger effects. Point being — mixtures are probably important!
+
