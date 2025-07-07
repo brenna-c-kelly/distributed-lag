@@ -13,14 +13,14 @@ library(performance)
 case <- read.csv("/Users/brenna/Downloads/clean_case_data.csv")
 
 # constructing the composite outcome > outcomes related to placental insufficiency
-case$pl_insuf <- case_when(case$sga10_by_sex > case$birthweightgrams ~ 1, # sga
-                           case$placenta_abr == 1 ~ 1)
+case$pl_insuf <- case_when(case$sga10_by_sex > case$birthweightgrams ~ 1,
+                           case$hypertension %in% c("H", "E", "P") ~ 1)
 case$pl_insuf <- ifelse(is.na(case$pl_insuf), 0, 1)
 
 table(case$pl_insuf)
 
 
-nu <- aggregate(case$pl_insuf, by = list(case$grid_id, case$week), FUN = sum)
+
 denom <- case |>
   group_by(grid_id, week) |>
   count() |>
@@ -30,12 +30,13 @@ head(denom)
 # all_st <- expand.grid(a$Group.1,
 #                       a$Group.2)
 
+nu <- aggregate(case$pl_insuf, by = list(case$grid_id, case$week), FUN = sum)
+
 grid_dat <- data.frame(grid_id = nu$Group.1,
                        week = nu$Group.2,
                        case = nu$x)
 grid_dat <- merge(grid_dat, denom, by = c("grid_id", "week"), all.x = TRUE)
 head(grid_dat)
-
 
 
 slc_shp <- get_acs(geography = "county",
@@ -45,10 +46,12 @@ slc_shp <- get_acs(geography = "county",
                    year = 2021) |>
   filter(GEOID == "49035")
 
-slc_shp <- st_transform(slc_shp, st_crs(grid))
-
 grid <- st_read("/Users/brenna/Downloads/shapefiles") |>
   dplyr::select(grid_id)
+
+slc_shp <- st_transform(slc_shp, st_crs(grid))
+
+## merge cases and 
 
 # test <- st_join(dat_aq_shp, slc_shp, join = st_intersects) |>
 #    filter(!is.na(GEOID))

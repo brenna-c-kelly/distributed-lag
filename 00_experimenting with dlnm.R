@@ -8,12 +8,12 @@ data(chicagoNMMAPS)
 
 # crossbasis(x, lag, argvar, arglag)
 ## builds a cross-basis matrix of the dimensions of the predictor and lags
-#    - x: complete set of exposure time series data
+#    - first arg: complete set of exposure time series data
 #    - lag: defines the maximum lag (or lag range, when using a vector l=2)
 #    - argvar: list of arguments to be passed to onebasis for generating the basis matrix for predictor
 #    - arglag: list of arguments to be passed to onebasis for generating the basis matrix for lag
 
-
+head(chicagoNMMAPS)
 cb1.pm <- crossbasis(chicagoNMMAPS$pm10, 
                      lag = 15, 
                      argvar = list(fun = "lin"), 

@@ -40,6 +40,8 @@ case <- case[, c("grid_id",  "momid", "birth_week",
 
 head(case)
 
+prop.table(table(case$pl_insuf))
+
 grid_weeks <- case[, c("grid_id", "momid",
                        "conception_week",
                        "birth_week", "pl_insuf")]
@@ -80,12 +82,13 @@ early_preg_exp <- preg_exp |>
   mutate(pregnancy_week = as.numeric(pregnancy_week)) |>
   filter(pregnancy_week <= 25)
 
+mean(early_preg_exp$mean_temp)
 
 ## build the cross-basis of pm
 cb1.pm <- crossbasis(early_preg_exp$max_pm, 
                      lag = 25, 
                      argvar = list(fun="ns", knots = 3), 
-                     arglag = list(fun="lin"))
+                     arglag = list(fun="ns", knots = 3))
 summary(cb1.pm)
 
 ## pm
@@ -93,15 +96,19 @@ m <- glm(pl_insuf ~ 1 + cb1.pm, # (1 | week)
          data = early_preg_exp, family = "binomial")
 
 pred1.pm <- crosspred(cb1.pm, m, at = 0:200,#0.27:199, 
-                      bylag = 1, cumul = TRUE, cen = mean(early_preg_exp$mean_pm))
+                      bylag = 1, cumul = TRUE, cen = mean(early_preg_exp$max_pm))
 
-plot(pred1.pm, col = "blue")
+plot(pred1.pm, col = "darkblue")
 
-pred1.pm <- crosspred(cb1.pm, m, at = 25, bylag = 1, cumul = TRUE, 
+pred1.pm <- crosspred(cb1.pm, m, at = 150, bylag = 1, cumul = TRUE, 
                       cen = mean(early_preg_exp$mean_pm))
+# beginning at ~70 µg/m³, 
+# significant between 5-25 weeks' gestation
+# relative to average exposure, exposure to 100 µg/m³ increases odds of placental insufficiency by 4.5%
+# up to 7.5% greater odds of placental insufficiency; exposure 
 
-plot(pred1.pm, var = 25, xlim = c(0, 25), xlab = "Lag from 25 (weeks)", ylab = "OR for maxpm = 50",
-     ylim = c(0.9,1.1), lab = c(8,5,5), col = 1, lwd = 1.5, ci = "area")
+plot(pred1.pm, var = 150, xlim = c(0, 25), xlab = "Lag from 25 (weeks)", ylab = "OR for maxpm = 150",
+     ylim = c(0.9, 1.1), lab = c(8, 5, 5), col = 1, lwd = 1.5, ci = "area")
 
 
 ## no2

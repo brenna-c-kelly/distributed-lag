@@ -428,9 +428,12 @@ Here we've got the means of all the pollutants and temperature. This is not the 
 
 ```{r}
 
-m_all_max <- glm(pl_insuf ~ 1 + cb1.temp_max + cb1.o3_max + 
+m_all_max <- glm(pl_insuf ~ 1 + #cb1.temp_max + cb1.o3_max + 
                     cb1.pm.max + cb1.no2_max,
                   data = early_preg_exp, family = "binomial")
+# AIC: 1052513 (intx)
+# AIC: 1052559 (no intx)
+summary(m_all_max)
 
 pred1.o3 <- crosspred(cb1.o3_max, m_all_max, at = 13.7:109,
                       bylag = 1, cumul = TRUE,

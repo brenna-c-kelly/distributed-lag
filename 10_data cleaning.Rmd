@@ -9,22 +9,357 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(lubridate)
 
-```{r cars}
-summary(cars)
 ```
 
-## Including Plots
 
-You can also embed plots, for example:
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+
+birth <- read.csv("data/birth_exposures_with_confounders.csv")
+
+# contains subsequent pregnancies
+length(unique(birth$momid))
+
+# drop subsequent pregnancies
+birth_sorted <- birth |>
+  arrange(momid, birthccyy, birthmm)
+
+birth <- birth_sorted[match(unique(birth_sorted$momid), birth_sorted$momid), ]
+
+# try to make long
+birth_l <- birth |>
+  pivot_longer(names_to = "exposure_week", cols = 17:368)
+
+# tidy up
+birth_l <- birth_l |>
+  select(!c(statefilenumber, geo_score, full_date))
+
+# create birth date
+birth_l <- birth_l |>
+  mutate(date = mdy(paste0(str_pad(birthmm, width = 2, pad = "0", side = "left"),
+                           str_pad(birthdd, width = 2, pad = "0", side = "left"),
+                           str_pad(birthccyy, width = 2, pad = "0", side = "left"))))
+
+# dates of exposure
+birth_l$gestation_week <- str_sub(birth_l$exposure_week, 
+                                  start = (nchar(birth_l$exposure_week) - 1),
+                                  end = nchar(birth_l$exposure_week)) |>
+  as.numeric()
+
+# make it person-week instead of person-pollutant-week
+birth_l$pollutant <- str_sub(birth_l$exposure_week, start = 0, 
+                             end = (nchar(birth_l$exposure_week) - 3))
+
+# remove NA values, which are exposures which occur after birth
+birth_l <- birth_l |>
+  filter(!is.na(value))
+
+# get the outcome by momid
+preterm_momid <- birth_l |>
+  select(c(momid, gestation, geoid, poverty_rate)) |>
+  distinct()
+
+birth_pt <- birth_l |> # person-time
+  pivot_wider(id_cols = c("momid", "date", "gestation_week"), 
+              names_from = pollutant, values_from = value)
+# this drops confounders, outcome, etc, but we can recover those later
+
+# gives us the outcome (gestational age at birth)
+birth_pt <- merge(birth_pt, preterm_momid, by = "momid")
+
+birth_pt$gestation_wk_end <- birth_pt$date - (7 * birth_pt$gestation_week)
+
+birth_pt$gestation_wk_start <- birth_pt$gestation_wk_end - 7
+
+head(birth_pt)
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+Now, to inversions  
+
+```{r}
+
+inv <- read.csv("/Users/brenna/Downloads/inversion_data.csv")
+
+names(inv) <- tolower(names(inv))
+
+inv$date <- mdy(inv$date)
+
+# basically it's Ogden, Provo or SLC
+table(inv$station)
+
+# categorize; inversion or not
+# inv$inversion <- ifelse(inv$era.adj.cap == "TRUE", "inversion", "no inversion") # MAYBE = NO
+inv$inversion <- ifelse(inv$era.adj.cap %in% c("TRUE", "Maybe"), "inversion", "no inversion") # MAYBE = YES
+
+inv_dates <- inv |>
+  filter(inversion == "inversion") |>
+  select(date, station)
+
+inv_dates$inversion <- 1
+
+# test$week <- week(inv_dates$date)
+
+# needs to be a spatiotemporal join, although a crude one
+# - could use census data to start, based on county
+#     - Davis (001) and Weber (057) = Ogden
+#     - Utah (049) = Provo
+#     - Salt Lake (035) = SLC
+#     - Else = no inversions; could restrict analysis to these locations first
+# - eventually, could look at distance from station to grid cells, to deal with boundary issues
+#     - need coordinates for this
+
+# get only births in counties with inversion models
+birth_inv <- birth_pt |>
+  mutate(county_fips = str_sub(geoid, start = 3, end = 5)) |>
+  filter(county_fips %in% c("001", "057", "049", "035")) |>
+  mutate(inv_station = case_when(county_fips %in% c("001", "057") ~ "OGD",
+                                 county_fips == "049" ~ "PVO",
+                                 county_fips == "035" ~ "SLC"))
+
+
+# probably the way to go is disaggregate to daily, then re-aggregate to weekly with n(inv_days)
+
+library(data.table)
+
+birth_days <- setDT(birth_inv)[ , list(momid = momid, 
+                                       date = seq(gestation_wk_start, 
+                                                  gestation_wk_end, by = "day"),
+                                       inv_station = inv_station,
+                                       gestation_week = gestation_week,
+                                       poverty_rate),
+                                by = 1:nrow(birth_inv)]
+
+birth_days_inv <- merge(birth_days, inv_dates, by.x = c("date", "inv_station"), 
+                        by.y = c("date", "station"), all.x = TRUE)
+
+birth_days_inv$inversion <- ifelse(is.na(birth_days_inv$inversion), 0, birth_days_inv$inversion)
+
+birth_days_inv <- birth_days_inv |>
+  group_by(momid, gestation_week, inversion) |>
+  tally()
+
+# think I can just take the inversion count?
+birth_days_inv <- birth_days_inv |>
+  filter(inversion == 1) |>
+  select(!inversion)
+
+head(birth_days_inv)
+
+birth_inv <- merge(birth_inv, birth_days_inv, by = c("momid", "gestation_week"), all.x = TRUE)
+
+birth_inv$n <- ifelse(is.na(birth_inv$n), 0, birth_inv$n - 1)
+
+table(birth_inv$n)
+
+```
+
+
+```{r}
+
+birth_inv$preterm <- relevel(
+  as.factor(ifelse(birth_inv$gestation <= 34, 
+                   "preterm/early", "late/term")), ref = "late/term")
+
+birth_inv$n <- as.factor(birth_inv$n)
+birth_inv$gestation_week <- as.factor(birth_inv$gestation_week)
+
+# summary(
+#   glm(preterm ~ n + gestation_week, data = birth_inv, 
+#       family = binomial(link = "log"))
+# )
+# 
+# library(INLA)
+# 
+# summary(
+#   inla(preterm ~ n + gestation_week, data = birth_inv, 
+#       family = "binomial", control.family = list(link = "log"))
+# )
+# 
+# 
+# birth_inv$preterm <- ifelse(birth_inv$preterm == "preterm/early", 1, 0)
+# 
+# summary(
+#   inla(preterm ~ n*gestation_week, data = birth_inv, 
+#        family = "binomial", control.family = list(link = "logit"),
+#        control.predictor = list(compute = T),
+#        control.compute = list(dic = TRUE, waic = TRUE),
+#        control.inla = list(int.strategy = "eb"),
+#        verbose = FALSE)
+# )
+
+
+```
+
+
+Should we just.. DLNM it?  
+
+
+```{r}
+
+library(dlnm)
+
+birth_inv$early_preterm <- ifelse(birth_inv$gestation <= 32, 1, 0)
+
+birth_inv$max_inv_pm <- ifelse(birth_inv$n != 0, birth_inv$max_pm, 0)
+
+# only first 20 weeks 
+birth_inv_20 <- birth_inv# |>
+  # filter(gestation >= 20)
+
+cb1.inv <- crossbasis(birth_inv_20$max_inv_pm, 
+                      lag = 32, 
+                      argvar = list(fun = "ns", knots = 3), 
+                      arglag = list(fun = "ns", knots = 3))
+
+# cb1.temp <- crossbasis(chicagoNMMAPS$temp, lag = 3, argvar = list(df = 5), #
+#                        arglag = list(fun = "strata", breaks = 1))
+
+summary(cb1.inv)
+# this describes the crossbasis functions and basis for the predictor and lag
+
+library(splines)
+
+model1 <- glm(early_preterm ~ cb1.inv + poverty_rate,
+                family = "binomial", birth_inv_20)
+
+summary(model1)
+# bs:     374772; 161304
+# ns, 3k: 374763; 161327
+# 159016
+
+
+pred1.inv <- crosspred(cb1.inv, model1, at = 0:120, 
+                       bylag = 1, cumul = TRUE, cen = 0)
+
+plot(pred1.inv, zlab = "Risk of Preterm birth", 
+     ylab = "Gestational Week", xlab = "Inversion-specific PM2.5 (ppm)")
+
+# lower end of each AQI category
+par(mfrow = c(2, 2))
+plot(pred1.inv, var = 9, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 9 ppm (AQI = 50)")
+plot(pred1.inv, var = 35, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 35 ppm (AQI = 100)")
+plot(pred1.inv, var = 55, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 55 ppm (AQI = 150)")
+plot(pred1.inv, var = 119, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 119 ppm (AQI ~ 200)")
+dev.off()
+
+# median of each AQI category
+par(mfrow = c(2, 2))
+plot(pred1.inv, var = 4, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 4 ppm (AQI = 25)")
+plot(pred1.inv, var = 21, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 21 ppm (AQI = 75)")
+plot(pred1.inv, var = 45, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 45 ppm (AQI = 125)")
+plot(pred1.inv, var = 89, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 89 ppm (AQI = 175)")
+dev.off()
+
+```
+
+
+Trying multinomial
+
+```{r}
+
+library(nnet)
+library(dlnm)
+
+birth_inv <- birth_inv |>
+  mutate(preterm_status = case_when(gestation <= 28 ~ "early preterm",
+                                    gestation <= 32 ~ "preterm",
+                                    gestation <= 37 ~ "late preterm",
+                                    gestation > 37 ~ "term")) |>
+  mutate(preterm_status = relevel(as.factor(preterm_status), ref = "term"))
+
+birth_inv$max_inv_pm <- ifelse(birth_inv$n != 0, birth_inv$max_pm, 0)
+
+# only first 20 weeks 
+birth_inv_20 <- birth_inv# |>
+  # filter(gestation >= 20)
+
+cb1.inv <- crossbasis(birth_inv_20$max_inv_pm, 
+                      lag = 32, 
+                      argvar = list(fun = "ns", knots = 3), 
+                      arglag = list(fun = "ns", knots = 3))
+
+# cb1.temp <- crossbasis(chicagoNMMAPS$temp, lag = 3, argvar = list(df = 5), #
+#                        arglag = list(fun = "strata", breaks = 1))
+
+summary(cb1.inv)
+# this describes the crossbasis functions and basis for the predictor and lag
+
+library(splines)
+
+model1 <- multinom(preterm_status ~ cb1.inv + poverty_rate,
+                   birth_inv_20)
+
+summary(model1)
+
+pred1.inv <- crosspred(cb1.inv, vcov = vcov(model1), coef = coef(model1), at = 0:120, 
+                       bylag = 1, cumul = TRUE, cen = 0)
+
+plot(pred1.inv, zlab = "Risk of Preterm birth", 
+     ylab = "Gestational Week", xlab = "Inversion-specific PM2.5 (ppm)")
+
+# lower end of each AQI category
+par(mfrow = c(2, 2))
+plot(pred1.inv, var = 9, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 9 ppm (AQI = 50)")
+plot(pred1.inv, var = 35, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 35 ppm (AQI = 100)")
+plot(pred1.inv, var = 55, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 55 ppm (AQI = 150)")
+plot(pred1.inv, var = 119, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 119 ppm (AQI ~ 200)")
+dev.off()
+
+# median of each AQI category
+par(mfrow = c(2, 2))
+plot(pred1.inv, var = 4, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 4 ppm (AQI = 25)")
+plot(pred1.inv, var = 21, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 21 ppm (AQI = 75)")
+plot(pred1.inv, var = 45, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 45 ppm (AQI = 125)")
+plot(pred1.inv, var = 89, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 89 ppm (AQI = 175)")
+dev.off()
+
+```
+
+
+
+
+
+
+
