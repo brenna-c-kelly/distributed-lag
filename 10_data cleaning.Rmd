@@ -25,6 +25,51 @@ library(lubridate)
 
 birth <- read.csv("data/birth_exposures_with_confounders.csv")
 
+# get race, ethnicity
+mom_2013 <- fread('/Users/brenna/Downloads/births 2013+.csv')
+mom_2016 <- fread('/Users/brenna/Downloads/births 2016+.csv')
+
+mom <- rbind(mom_2013, mom_2016)
+
+# clean race, ethnicity
+mom <- mom |>
+  mutate(ethn = case_when(MomHispanicOrigin == 1 | MomHispanicMex == 1 |
+                            MomHispanicCuban == 1 | MomHispanicPuertoRican == 1 |
+                            MomHispanicOther == 1 | MomHispanicOtherSpec != "" |
+                            !MomHispanicOtherSpec %in% c("*", "") ~ # primacy
+                            "hispanic"),
+         ethn = ifelse(is.na(ethn), "not hispanic", ethn),
+         race = case_when(MomRaceWhite == 1 ~ "white",
+                          MomRaceBlack == 1 ~ "black",
+                          MomRaceAmIndian == 1 ~ "amindian",
+                          MomRaceChinese == 1 | MomRaceJapanese == 1 |
+                            MomRaceFilipino == 1 | MomRaceOtherAsian == 1 |
+                            MomRaceAsianIndian == 1 | MomRaceKorean == 1 |
+                            MomRaceVietnamese == 1 ~ "asian",
+                          MomRaceHawaiian == 1 | MomRaceSamoan == 1 |
+                            MomRaceGuamanian == 1 | MomRacePacIslander == 1 |
+                            MomRaceTongan == 1 ~ "nhopi",
+                          MomRaceOther == 1 | MomRaceOtherSpec1 == 1 |
+                            MomRaceOtherSpec2 == 1 | MomRaceUnknown == 1 ~ "other"),
+         race = ifelse(is.na(race), "unknown", race), # note, only 160 with unknown race
+         race_ethn = ifelse(ethn == "hispanic", "hispanic", race),
+         # ^for model, gives primacy to hispanic
+         race_ethn = ifelse(race_ethn == "unknown", "other", race_ethn)) |>
+         # ^combines other and unknown for model
+  rename_with(tolower) |>
+  select(momid, birthccyy, birthmm, race, ethn, race_ethn) |>
+  mutate(momid = as.numeric(momid))
+
+# join race information with birth dataset
+
+birth <- merge(birth, mom, by = c("momid", "birthccyy", "birthmm"))
+
+```
+
+Additional cleaning
+
+```{r}
+
 # contains subsequent pregnancies
 length(unique(birth$momid))
 
@@ -212,7 +257,16 @@ birth_inv$early_preterm <- ifelse(birth_inv$gestation <= 32, 1, 0)
 
 birth_inv$max_inv_pm <- ifelse(birth_inv$n != 0, birth_inv$max_pm, 0)
 
-# only first 20 weeks 
+# check missingness
+summary(birth_inv_20[which(birth_inv_20$gestation_week == 32), "max_inv_pm"])
+
+# how many person-weeks don't exist for later gestation?
+aggregate(birth_inv$early_preterm, by = list(birth_inv$gestation_week), FUN = sum)
+
+# poverty is missing for 514 folks
+summary(birth_inv_20$poverty_rate)
+
+# only first 20 weeks; or not; using person-time
 birth_inv_20 <- birth_inv# |>
   # filter(gestation >= 20)
 
@@ -241,23 +295,100 @@ summary(model1)
 pred1.inv <- crosspred(cb1.inv, model1, at = 0:120, 
                        bylag = 1, cumul = TRUE, cen = 0)
 
-plot(pred1.inv, zlab = "Risk of Preterm birth", 
-     ylab = "Gestational Week", xlab = "Inversion-specific PM2.5 (ppm)")
+pred1.inv <- crosspred(cb1.inv, model1, at = 0:6*20, 
+                       bylag = 1, cumul = TRUE, cen = 0,
+                       ci.level = 0.95)
+str(pred1.inv)
+
+plot(pred1.inv, zlab = "Relative risk of Preterm birth", 
+     ylab = "Gestational Week", xlab = "Inversion-specific PM2.5")
+
+plot(pred1.inv, "slices", lag = 8, #zlab = "Relative risk of Preterm birth", 
+     ylab = "Relative risk of preterm birth", xlab = "Inversion-specific PM2.5")
+
+
+# sum allRRfit?
+pred1.inv$allfit
+pred1.inv$allfit[1:15] # only up to 84, per Joel
+sum(pred1.inv$allfit[1:15]) # sum it?
+pred1.inv$allse[1:15] # standard errors
+pred1.inv$matRRfit # this is weekwise
+mean(pred1.inv$matRRfit) # 1.08 overall effect? any inversion pollution at any week
+mean(pred1.inv$matRRlow) # 1.02
+mean(pred1.inv$matRRhigh) # 1.16
+
+mean(pred1.inv$allfit[1:15]) # 0.91 overall effect?
+mean(pred1.inv$allRRfit[1:15]) # 3.70 overall effect?
+mean(pred1.inv$allRRlow[1:15]) # 1.59
+mean(pred1.inv$allRRhigh[1:15]) # 10.95
+
+# why sum it — because people aren't just exposed in one week, but for their entire pregnancy
+# if you're exposed to 20 micrograms/m2 during entire pregnancy, what's your overall risk?
+pred1.inv$matRRfit
+
+test_20 <- crosspred(cb1.inv, model1, at = 60, 
+                     cumul = FALSE, cen = 0,
+                     ci.level = 0.95)
+# sum(test_20$matRRfit)
+plot(test_20, var = 60)
+
+test_20
+
+# I think allRRfit is the cumulative effect of an exposure during entire pregnancy 7/9
+# https://cran.r-project.org/web/packages/dlnm/dlnm.pdf
+test_20$allRRfit 
+
+
+
+# overall?
+test <- crosspred(cb1.inv, model1, at = 0:4*20, 
+          cumul = FALSE, cen = 0,
+          ci.level = 0.95) # this might be the one
+
+mean(test$matRRfit)
+mean(test$matRRfit[1:5, ])
+sum(log(test$matRRfit))
+
+sum(log(test$matRRfit[5, ]))
+sum(log(test$matRRlow[5, ]))
+sum(log(test$matRRhigh[5, ]))
+
+mean(test$matRRfit[5, ])
+mean(test$matRRlow[5, ])
+mean(test$matRRhigh[5, ])
+
+test$allse
+
+# sum all effects at pm2.5 = 0, 20, ... 80
+# it's the cumulative, overall effect of these exposures throughout all pregnancy
+
+main_AQI50 = expression(paste("Inversion PM"[2.5], 
+                                 " = 9 µg/m" ^ 2, 
+                                 " (AQI = 50)"))
+main_AQI100 = expression(paste("Inversion PM"[2.5], 
+                                  " = 35 µg/m" ^ 2, 
+                                  " (AQI = 100)"))
+main_AQI150 = expression(paste("Inversion PM"[2.5], 
+                                  " = 55 µg/m" ^ 2, 
+                                  " (AQI = 150)"))
+main_AQI200 = expression(paste("Inversion PM"[2.5], 
+                                  " = 119 µg/m" ^ 2, 
+                                  " (AQI = 200)"))
 
 # lower end of each AQI category
 par(mfrow = c(2, 2))
 plot(pred1.inv, var = 9, #ylim = c(0.95, 5.25), 
-     ylab = "Risk of Preterm birth", 
-     xlab = "Week / Lag", main = "Inversion PM2.5 = 9 ppm (AQI = 50)")
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI50)
 plot(pred1.inv, var = 35, #ylim = c(0.95, 5.25), 
-     ylab = "Risk of Preterm birth", 
-     xlab = "Week / Lag", main = "Inversion PM2.5 = 35 ppm (AQI = 100)")
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI100)
 plot(pred1.inv, var = 55, #ylim = c(0.95, 5.25), 
-     ylab = "Risk of Preterm birth", 
-     xlab = "Week / Lag", main = "Inversion PM2.5 = 55 ppm (AQI = 150)")
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI150)
 plot(pred1.inv, var = 119, #ylim = c(0.95, 5.25), 
-     ylab = "Risk of Preterm birth", 
-     xlab = "Week / Lag", main = "Inversion PM2.5 = 119 ppm (AQI ~ 200)")
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI200)
 dev.off()
 
 # median of each AQI category
@@ -277,6 +408,75 @@ plot(pred1.inv, var = 89, #ylim = c(0.95, 5.25),
 dev.off()
 
 ```
+
+Does the effect hold when it's not inversion-specific PM2.5? i.e., is there something unique about inversion exposure (besides being high) that increases risk?
+
+```{r}
+
+cb1.inv <- crossbasis(birth_inv_20$max_pm, 
+                      lag = 32, 
+                      argvar = list(fun = "ns", knots = 3), 
+                      arglag = list(fun = "ns", knots = 3))
+
+# cb1.temp <- crossbasis(chicagoNMMAPS$temp, lag = 3, argvar = list(df = 5), #
+#                        arglag = list(fun = "strata", breaks = 1))
+
+summary(cb1.inv)
+# this describes the crossbasis functions and basis for the predictor and lag
+
+library(splines)
+
+model1 <- glm(early_preterm ~ cb1.inv + poverty_rate,
+                family = "binomial", birth_inv_20)
+
+summary(model1)
+
+pred1.inv <- crosspred(cb1.inv, model1, at = 0:199, 
+                       bylag = 1, cumul = TRUE, cen = 0,
+                       ci.level = 0.95)
+
+plot(pred1.inv, zlab = "Relative risk of Preterm birth", 
+     ylab = "Gestational Week", xlab = "Inversion-specific PM2.5")
+
+# yes — very different
+# 
+
+# lower AQI categories
+par(mfrow = c(2, 3))
+plot(pred1.inv, var = 9, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 9 (AQI = 50)")
+plot(pred1.inv, var = 35, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 35 (AQI = 100)")
+plot(pred1.inv, var = 55, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 55 (AQI = 150)")
+plot(pred1.inv, var = 119, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 119 (AQI ~ 200)")
+plot(pred1.inv, var = 150, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 150 ")
+plot(pred1.inv, var = 199, #ylim = c(0.95, 5.25), 
+     ylab = "Risk of Preterm birth", 
+     xlab = "Week / Lag", main = "Inversion PM2.5 = 199 ")
+dev.off()
+
+
+plot(
+  crosspred(cb1.inv, model1, from = 0, to = 199, 
+            bylag = 1, cumul = TRUE, cen = 0)
+)
+
+pred1.inv$allfit
+
+summary(pred1.inv)
+
+```
+
+
+
 
 
 Trying multinomial
