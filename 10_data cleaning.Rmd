@@ -109,7 +109,7 @@ birth_l <- birth_l |>
 
 # get the outcome by momid
 preterm_momid <- birth_l |>
-  select(c(momid, gestation, geoid, poverty_rate)) |>
+  select(c(momid, gestation, geoid, poverty_rate, race, ethn, race_ethn)) |>
   distinct()
 
 birth_pt <- birth_l |> # person-time
@@ -166,11 +166,10 @@ inv_dates$inversion <- 1
 # get only births in counties with inversion models
 birth_inv <- birth_pt |>
   mutate(county_fips = str_sub(geoid, start = 3, end = 5)) |>
-  filter(county_fips %in% c("001", "057", "049", "035")) |>
-  mutate(inv_station = case_when(county_fips %in% c("001", "057") ~ "OGD",
+  filter(county_fips %in% c("011", "057", "049", "035")) |>
+  mutate(inv_station = case_when(county_fips %in% c("011", "057") ~ "OGD",
                                  county_fips == "049" ~ "PVO",
                                  county_fips == "035" ~ "SLC"))
-
 
 # probably the way to go is disaggregate to daily, then re-aggregate to weekly with n(inv_days)
 
@@ -179,9 +178,8 @@ library(data.table)
 birth_days <- setDT(birth_inv)[ , list(momid = momid, 
                                        date = seq(gestation_wk_start, 
                                                   gestation_wk_end, by = "day"),
-                                       inv_station = inv_station,
-                                       gestation_week = gestation_week,
-                                       poverty_rate),
+                                       inv_station, gestation_week,
+                                       poverty_rate, race, ethn, race_ethn),
                                 by = 1:nrow(birth_inv)]
 
 birth_days_inv <- merge(birth_days, inv_dates, by.x = c("date", "inv_station"), 
@@ -253,6 +251,8 @@ Should we just.. DLNM it?
 
 library(dlnm)
 
+birth_inv$race_ethn <- relevel(as.factor(birth_inv$race_ethn), ref = "white")
+
 birth_inv$early_preterm <- ifelse(birth_inv$gestation <= 32, 1, 0)
 
 birth_inv$max_inv_pm <- ifelse(birth_inv$n != 0, birth_inv$max_pm, 0)
@@ -283,21 +283,22 @@ summary(cb1.inv)
 
 library(splines)
 
-model1 <- glm(early_preterm ~ cb1.inv + poverty_rate,
+model1 <- glm(early_preterm ~ cb1.inv + poverty_rate + race_ethn,
                 family = "binomial", birth_inv_20)
 
 summary(model1)
 # bs:     374772; 161304
 # ns, 3k: 374763; 161327
 # 159016
-
+# AIC with race_ethn (and poverty): 158652
+# AIC without race_ethn:            158977
 
 pred1.inv <- crosspred(cb1.inv, model1, at = 0:120, 
                        bylag = 1, cumul = TRUE, cen = 0)
 
-pred1.inv <- crosspred(cb1.inv, model1, at = 0:6*20, 
-                       bylag = 1, cumul = TRUE, cen = 0,
-                       ci.level = 0.95)
+# pred1.inv <- crosspred(cb1.inv, model1, at = 0:6*20, 
+#                        bylag = 1, cumul = TRUE, cen = 0,
+#                        ci.level = 0.95)
 str(pred1.inv)
 
 plot(pred1.inv, zlab = "Relative risk of Preterm birth", 
@@ -326,17 +327,27 @@ mean(pred1.inv$allRRhigh[1:15]) # 10.95
 # if you're exposed to 20 micrograms/m2 during entire pregnancy, what's your overall risk?
 pred1.inv$matRRfit
 
-test_20 <- crosspred(cb1.inv, model1, at = 60, 
-                     cumul = FALSE, cen = 0,
-                     ci.level = 0.95)
+overall_20 <- crosspred(cb1.inv, model1, at = 20, 
+                        cumul = FALSE, cen = 0,
+                        ci.level = 0.95)
 # sum(test_20$matRRfit)
-plot(test_20, var = 60)
+plot(overall_20, var = 20)
+overall_20$allRRfit
+overall_20$allRRlow
+overall_20$allRRhigh
 
 test_20
 
 # I think allRRfit is the cumulative effect of an exposure during entire pregnancy 7/9
 # https://cran.r-project.org/web/packages/dlnm/dlnm.pdf
-test_20$allRRfit 
+test_20$allRRfit
+
+crosspred(cb1.inv, model1, at = 40, 
+          cumul = FALSE, cen = 0,
+          ci.level = 0.95)$allRRfit
+crosspred(cb1.inv, model1, at = 60, 
+          cumul = FALSE, cen = 0,
+          ci.level = 0.95)$allRRfit
 
 
 
@@ -476,6 +487,61 @@ summary(pred1.inv)
 ```
 
 
+Multinomial ala Gasparrini
+
+```{r}
+
+library(nnet)
+
+birth_inv <- birth_inv |>
+  mutate(preterm_status = case_when(gestation <= 28 ~ "early preterm",
+                                    gestation <= 32 ~ "preterm",
+                                    gestation <= 37 ~ "late preterm",
+                                    gestation > 37 ~ "term")) |>
+  mutate(preterm_status = relevel(as.factor(preterm_status), ref = "term"))
+
+birth_inv$max_inv_pm <- ifelse(birth_inv$n != 0, birth_inv$max_pm, 0)
+
+# only first 20 weeks 
+birth_inv_20 <- birth_inv# |>
+  # filter(gestation >= 20)
+
+cb1.inv <- crossbasis(birth_inv_20$max_inv_pm, 
+                      lag = 32, 
+                      argvar = list(fun = "ns", knots = 3), 
+                      arglag = list(fun = "ns", knots = 3))
+
+
+# multinomial, multiple categories — error with crosspred
+m_multi <- multinom(preterm_status ~ cb1.inv + poverty_rate + 
+                      race_ethn, birth_inv_20)
+summary(m_multi)
+
+# extract coef/vcov for various categories
+cat <- c("early preterm", "late preterm", "preterm") # edit BK
+parlist <- lapply(seq(cat), function(i) {
+  coef <- coef(m_multi)[i,][-1]
+  ind <- (i-1)*7+seq(6)+1
+  vcov <- vcov(m_multi)[ind,ind]
+  list(coef=coef, vcov=vcov)
+})
+names(parlist) <- cat
+
+# prediction
+cplist <- lapply(cat, function(x)
+  crosspred(cb1.inv, coef=parlist[[x]]$coef, vcov=parlist[[x]]$vcov, at=1, 
+    cumul=TRUE, cen=0)
+)
+  
+# plot
+plot(cplist[[1]], var=1, ci="l", col=2)
+lines(cplist[[2]], var=1, ci="l", col=3)
+lines(cplist[[3]], var=1, ci="l", col=4)
+legend("top", legend=cat, col=2:4, bty="n", ncol=1, lty=1, cex=0.7)
+
+
+```
+
 
 
 
@@ -483,8 +549,6 @@ Trying multinomial
 
 ```{r}
 
-library(nnet)
-library(dlnm)
 
 birth_inv <- birth_inv |>
   mutate(preterm_status = case_when(gestation <= 28 ~ "early preterm",

@@ -1,0 +1,357 @@
+---
+title: "01_DLNM logistic"
+author: "Brenna Kelly"
+date: "2025-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, results='hide'}
+
+library(dlnm)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(splines)
+library(lubridate)
+library(data.table)
+
+```
+
+
+```{r, echo = FALSE, results='hide'}
+
+birth <- read.csv("data/birth_exposures_with_confounders.csv")
+
+# get race, ethnicity
+mom_2013 <- fread('/Users/brenna/Downloads/births 2013+.csv')
+mom_2016 <- fread('/Users/brenna/Downloads/births 2016+.csv')
+
+mom <- rbind(mom_2013, mom_2016)
+
+# clean race, ethnicity
+mom <- mom |>
+  mutate(ethn = case_when(MomHispanicOrigin == 1 | MomHispanicMex == 1 |
+                            MomHispanicCuban == 1 | MomHispanicPuertoRican == 1 |
+                            MomHispanicOther == 1 | MomHispanicOtherSpec != "" |
+                            !MomHispanicOtherSpec %in% c("*", "") ~ # primacy
+                            "hispanic"),
+         ethn = ifelse(is.na(ethn), "not hispanic", ethn),
+         race = case_when(MomRaceWhite == 1 ~ "white",
+                          MomRaceBlack == 1 ~ "black",
+                          MomRaceAmIndian == 1 ~ "amindian",
+                          MomRaceChinese == 1 | MomRaceJapanese == 1 |
+                            MomRaceFilipino == 1 | MomRaceOtherAsian == 1 |
+                            MomRaceAsianIndian == 1 | MomRaceKorean == 1 |
+                            MomRaceVietnamese == 1 ~ "asian",
+                          MomRaceHawaiian == 1 | MomRaceSamoan == 1 |
+                            MomRaceGuamanian == 1 | MomRacePacIslander == 1 |
+                            MomRaceTongan == 1 ~ "nhopi",
+                          MomRaceOther == 1 | MomRaceOtherSpec1 == 1 |
+                            MomRaceOtherSpec2 == 1 | MomRaceUnknown == 1 ~ "other"),
+         race = ifelse(is.na(race), "unknown", race), # note, only 160 with unknown race
+         race_ethn = ifelse(ethn == "hispanic", "hispanic", race),
+         # ^for model, gives primacy to hispanic
+         race_ethn = ifelse(race_ethn == "unknown", "other", race_ethn)) |>
+         # ^combines other and unknown for model
+  rename_with(tolower) |>
+  select(momid, birthccyy, birthmm, race, ethn, race_ethn) |>
+  mutate(momid = as.numeric(momid))
+
+# join race information with birth dataset
+
+birth <- merge(birth, mom, by = c("momid", "birthccyy", "birthmm"))
+
+```
+
+Additional cleaning:
+
+```{r, echo = FALSE, results='hide'}
+
+# contains subsequent pregnancies
+# length(unique(birth$momid))
+
+# drop subsequent pregnancies
+birth_sorted <- birth |>
+  arrange(momid, birthccyy, birthmm)
+
+birth <- birth_sorted[match(unique(birth_sorted$momid), birth_sorted$momid), ]
+
+# try to make long
+birth_l <- birth |>
+  pivot_longer(names_to = "exposure_week", cols = 17:368)
+
+# tidy up
+birth_l <- birth_l |>
+  select(!c(statefilenumber, geo_score, full_date))
+
+# create birth date
+birth_l <- birth_l |>
+  mutate(date = mdy(paste0(str_pad(birthmm, width = 2, pad = "0", side = "left"),
+                           str_pad(birthdd, width = 2, pad = "0", side = "left"),
+                           str_pad(birthccyy, width = 2, pad = "0", side = "left"))))
+
+# dates of exposure
+birth_l$gestation_week <- str_sub(birth_l$exposure_week, 
+                                  start = (nchar(birth_l$exposure_week) - 1),
+                                  end = nchar(birth_l$exposure_week)) |>
+  as.numeric()
+
+# make it person-week instead of person-pollutant-week
+birth_l$pollutant <- str_sub(birth_l$exposure_week, start = 0, 
+                             end = (nchar(birth_l$exposure_week) - 3))
+
+# remove NA values, which are exposures which occur after birth
+birth_l <- birth_l |>
+  filter(!is.na(value))
+
+# get the outcome by momid
+preterm_momid <- birth_l |>
+  select(c(momid, gestation, geoid, poverty_rate, race, ethn, race_ethn)) |>
+  distinct()
+
+birth_pt <- birth_l |> # person-time
+  pivot_wider(id_cols = c("momid", "date", "gestation_week"), 
+              names_from = pollutant, values_from = value)
+# this drops confounders, outcome, etc, but we can recover those later
+
+# gives us the outcome (gestational age at birth)
+birth_pt <- merge(birth_pt, preterm_momid, by = "momid")
+
+birth_pt$gestation_wk_end <- birth_pt$date - (7 * birth_pt$gestation_week)
+
+birth_pt$gestation_wk_start <- birth_pt$gestation_wk_end - 7
+
+head(birth_pt)
+
+```
+
+
+Adding inversions data:
+
+```{r, echo = FALSE, results='hide'}
+
+inv <- read.csv("/Users/brenna/Downloads/inversion_data.csv")
+
+names(inv) <- tolower(names(inv))
+
+inv$date <- mdy(inv$date)
+
+# basically it's Ogden, Provo or SLC
+table(inv$station)
+
+# categorize; inversion or not
+# inv$inversion <- ifelse(inv$era.adj.cap == "TRUE", "inversion", "no inversion") # MAYBE = NO
+inv$inversion <- ifelse(inv$era.adj.cap %in% c("TRUE", "Maybe"), "inversion", "no inversion") # MAYBE = YES
+
+inv_dates <- inv |>
+  filter(inversion == "inversion") |>
+  select(date, station)
+
+inv_dates$inversion <- 1
+
+# test$week <- week(inv_dates$date)
+
+# needs to be a spatiotemporal join, although a crude one
+# - could use census data to start, based on county
+#     - Davis (001) and Weber (057) = Ogden
+#     - Utah (049) = Provo
+#     - Salt Lake (035) = SLC
+#     - Else = no inversions; could restrict analysis to these locations first
+# - eventually, could look at distance from station to grid cells, to deal with boundary issues
+#     - need coordinates for this
+
+# get only births in counties with inversion models
+birth_inv <- birth_pt |>
+  mutate(county_fips = str_sub(geoid, start = 3, end = 5)) |>
+  filter(county_fips %in% c("011", "057", "049", "035")) |>
+  mutate(inv_station = case_when(county_fips %in% c("011", "057") ~ "OGD",
+                                 county_fips == "049" ~ "PVO",
+                                 county_fips == "035" ~ "SLC"))
+
+# probably the way to go is disaggregate to daily, then re-aggregate to weekly with n(inv_days)
+
+birth_days <- setDT(birth_inv)[ , list(momid = momid, 
+                                       date = seq(gestation_wk_start, 
+                                                  gestation_wk_end, by = "day"),
+                                       inv_station, gestation_week,
+                                       poverty_rate, race, ethn, race_ethn),
+                                by = 1:nrow(birth_inv)]
+
+birth_days_inv <- merge(birth_days, inv_dates, by.x = c("date", "inv_station"), 
+                        by.y = c("date", "station"), all.x = TRUE)
+
+birth_days_inv$inversion <- ifelse(is.na(birth_days_inv$inversion), 0, birth_days_inv$inversion)
+
+birth_days_inv <- birth_days_inv |>
+  group_by(momid, gestation_week, inversion) |>
+  tally()
+
+# think I can just take the inversion count?
+birth_days_inv <- birth_days_inv |>
+  filter(inversion == 1) |>
+  select(!inversion)
+
+head(birth_days_inv)
+
+birth_inv <- merge(birth_inv, birth_days_inv, by = c("momid", "gestation_week"), all.x = TRUE)
+
+birth_inv$n <- ifelse(is.na(birth_inv$n), 0, birth_inv$n - 1)
+
+# table(birth_inv$n)
+
+# prop.table(table(birth_inv$n != 0)) # proportion of pregnancy weeks with inversion exposure
+
+```
+
+```{r, echo = FALSE, results='hide'}
+
+# light cleaning
+birth_inv$preterm <- relevel(
+  as.factor(ifelse(birth_inv$gestation <= 34, 
+                   "preterm/early", "late/term")), ref = "late/term")
+
+birth_inv$n <- as.factor(birth_inv$n)
+
+birth_inv$gestation_week <- as.factor(birth_inv$gestation_week)
+
+birth_inv$race_ethn <- relevel(as.factor(birth_inv$race_ethn), ref = "white")
+
+birth_inv$early_preterm <- ifelse(birth_inv$gestation <= 32, 1, 0) # include "very" early and early
+
+birth_inv$max_inv_pm <- ifelse(birth_inv$n != 0, birth_inv$max_pm, 0)
+
+# how many person-weeks don't exist for later gestation?
+aggregate(birth_inv$early_preterm, by = list(birth_inv$gestation_week), FUN = sum)
+
+# only first 20 weeks; or not; using person-time, don't filter
+birth_inv_20 <- birth_inv# |>
+  # filter(gestation >= 20)
+
+# check missingness
+summary(birth_inv_20[which(birth_inv_20$gestation_week == 32), "max_inv_pm"])
+
+# poverty is missing for 514 folks; fix later
+summary(birth_inv_20$poverty_rate)
+
+```
+
+DLNM model:
+
+```{r, out.width="150%"}
+
+# create crossbasis for exposure-lag-response
+cb1.inv <- crossbasis(birth_inv_20$max_inv_pm, 
+                      lag = 32, 
+                      argvar = list(fun = "ns", knots = 3), 
+                      arglag = list(fun = "ns", knots = 3))
+summary(cb1.inv) # this describes the crossbasis functions and basis for the predictor and lag
+
+# model
+model1 <- glm(early_preterm ~ cb1.inv + 
+                poverty_rate + race_ethn, # adjusting for confounders
+                family = "binomial", birth_inv_20)
+
+summary(model1)
+
+# get predictions for each exposure-lag
+pred1.inv <- crosspred(cb1.inv, model1, at = 0:120, 
+                       bylag = 1, cumul = TRUE, cen = 0)
+
+# str(pred1.inv)
+
+# full exposure-lag-response surface
+plot(pred1.inv, zlab = "Relative risk of preterm birth", 
+     ylab = "Gestational week", xlab = "Inversion-specific PM2.5",
+     col = "white")
+
+# lag-response curves at specific exposure thresholds
+# based on the lawer end of each AQI category
+# https://www.airnow.gov/aqi/aqi-basics/
+
+# axis labels
+main_AQI50 = expression(paste("Inversion PM"[2.5], 
+                                 " = 9 µg/m" ^ 2, 
+                                 " (AQI = 50)"))
+main_AQI100 = expression(paste("Inversion PM"[2.5], 
+                                  " = 35 µg/m" ^ 2, 
+                                  " (AQI = 100)"))
+main_AQI150 = expression(paste("Inversion PM"[2.5], 
+                                  " = 55 µg/m" ^ 2, 
+                                  " (AQI = 150)"))
+main_AQI200 = expression(paste("Inversion PM"[2.5], 
+                                  " = 119 µg/m" ^ 2, 
+                                  " (AQI = 200)"))
+# curves
+par(mfrow = c(2, 2))
+plot(pred1.inv, var = 9, #ylim = c(0.95, 5.25), 
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI50)
+plot(pred1.inv, var = 35, #ylim = c(0.95, 5.25), 
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI100)
+plot(pred1.inv, var = 55, #ylim = c(0.95, 5.25), 
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI150)
+plot(pred1.inv, var = 119, #ylim = c(0.95, 5.25), 
+     ylab = "Relative risk of preterm birth", 
+     xlab = "Gestational week", main = main_AQI200)
+dev.off()
+
+###############
+# given these plots, what exposure-lag-response effects would you want to interpret?
+# e.g., weeks 0-6 and 24-32 when AQI = 100
+###############
+
+```
+
+Note that at some points, it appears that PM2.5 has a "protective effect". In reality, PM2.5 exposure is unlikely to decrease risk of preterm birth. In this case, it's useful to also look at the cumulative (or overall) effect of exposure. i.e., PM2.5 = 9 in early pregnancy may appear to decrease risk of preterm birth; but if someone were exposed to PM2.5 = 9 for their entire pregnancy, what would the overall effect be?
+
+```{r}
+
+# create crosspredictions at the AQI thresholds see2 above
+# AQI = 50
+overall_9 <- crosspred(cb1.inv, model1, at = 9, 
+                        cumul = FALSE, cen = 0,
+                        ci.level = 0.95)
+# this RR is the overall relative risk, and low/high are the 95% confidence intervals
+print("Overall effect of 9 micrograms/m2 of PM2.5")
+paste0(round(overall_9$allRRfit[[1]], 2), ", 95% CI [", 
+       round(overall_9$allRRlow, 2), ", ", 
+       round(overall_9$allRRhigh, 2), "]")
+
+# AQI = 100
+overall_35 <- crosspred(cb1.inv, model1, at = 35, 
+                        cumul = FALSE, cen = 0,
+                        ci.level = 0.95)
+
+print("Overall effect of 35 micrograms/m2 of PM2.5")
+paste0(round(overall_35$allRRfit[[1]], 2), ", 95% CI [", 
+       round(overall_35$allRRlow, 2), ", ", 
+       round(overall_35$allRRhigh, 2), "]")
+
+# AQI = 150
+overall_55 <- crosspred(cb1.inv, model1, at = 55, 
+                        cumul = FALSE, cen = 0,
+                        ci.level = 0.95)
+
+print("Overall effect of 55 micrograms/m2 of PM2.5")
+paste0(round(overall_55$allRRfit[[1]], 2), ", 95% CI [", 
+       round(overall_55$allRRlow, 2), ", ", 
+       round(overall_55$allRRhigh, 2), "]")
+
+# AQI = 200
+overall_119 <- crosspred(cb1.inv, model1, at = 119, 
+                        cumul = FALSE, cen = 0,
+                        ci.level = 0.95)
+
+print("Overall effect of 119 micrograms/m2 of PM2.5")
+paste0(round(overall_119$allRRfit[[1]], 2), ", 95% CI [", 
+       round(overall_119$allRRlow, 2), ", ", 
+       round(overall_119$allRRhigh, 2), "]")
+# it's very unlikely (and impossible, in our dataset) to be exposed to 119 of inversion PM2.5 for an entire pregnancy, so we wouldn't place much emphasis on this particular interpretation
+
+```
