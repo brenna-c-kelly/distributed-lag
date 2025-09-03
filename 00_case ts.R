@@ -11,10 +11,10 @@ library(lubridate)
 library(data.table)
 
 ## set up exposure
-aq <- fread("/Users/brenna/Downloads/clean_dataset.csv")
+aq <- fread("data/clean_dataset.csv")
 
 
-case <- read.csv("/Users/brenna/Downloads/clean_case_data.csv")
+case <- read.csv("data/clean_case_data.csv")
 case$birth_date <- as_date(paste(case$birthccyy,
                                  case$birthmm,
                                  case$birthdd, sep = "-"))

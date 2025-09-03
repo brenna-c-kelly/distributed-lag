@@ -1,13 +1,14 @@
 ---
-title: "01_DLNM logistic"
+title: "01_WF_DLNM logistic"
 author: "Brenna Kelly"
-date: "2025-07-10"
+date: "2025-09-02"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
 
 ```{r, results='hide'}
 
@@ -164,7 +165,7 @@ birth <- birth_sorted[match(unique(birth_sorted$momid), birth_sorted$momid), ]
 
 # try to make long
 birth_l <- birth |>
-  pivot_longer(names_to = "exposure_week", cols = 17:368)
+  pivot_longer(names_to = "exposure_week", cols = 16:367)
 
 # tidy up
 birth_l <- birth_l |>
@@ -213,115 +214,117 @@ head(birth_pt)
 ```
 
 
-Adding inversions data:
+Adding wildfire smoke data:
 
 ```{r, echo = FALSE, results='hide'}
 
-inv <- read.csv("data/inversion_data.csv")
+hw <- read.csv("wf/HW_HYSPLIT_PM2p5_with_flag-2013-2016.csv") |>
+  mutate(station = "HW") |>
+  mutate(date = ymd(date))
+bt <- read.csv("wf/BT_HYSPLIT_PM2p5_with_flag-2013-2016.csv") |>
+  mutate(station = "BT") |>
+  mutate(date = mdy(date))
+lnd <- read.csv("wf/LND_HYSPLIT_PM2p5_with_flag-2013-2016.csv") |>
+  mutate(station = "LND") |>
+  mutate(date = ymd(date))
 
-names(inv) <- tolower(names(inv))
+wf <- rbind(hw, bt, lnd)
 
-inv$date <- mdy(inv$date)
+# Hawthorne (SLC), Bountiful (Davis), Lindon (Utah)
 
-# basically it's Ogden, Provo or SLC
-table(inv$station)
+# note: do not use PM2.5 from this csv, according to Heather
+wf$smoke <- ifelse(wf$flag == "y", "smoke", "no smoke")
 
-# categorize; inversion or not
-# inv$inversion <- ifelse(inv$era.adj.cap == "TRUE", "inversion", "no inversion") # MAYBE = NO
-inv$inversion <- ifelse(inv$era.adj.cap %in% c("TRUE", "Maybe"), "inversion", "no inversion") # MAYBE = YES
+wf_dates <- wf |>
+  filter(smoke == "smoke") |>
+  select(date, station) # eventually, we'll combine all three counties and will need station
 
-inv_dates <- inv |>
-  filter(inversion == "inversion") |>
-  select(date, station)
+wf_dates$smoke <- 1
 
-inv_dates$inversion <- 1
-
-# test$week <- week(inv_dates$date)
-
-# needs to be a spatiotemporal join, although a crude one
+# needs to be a spatiotemporal join, although a crude one ## as of 9/2, it's just temporal
 # - could use census data to start, based on county
-#     - Davis (001) and Weber (057) = Ogden
-#     - Utah (049) = Provo
-#     - Salt Lake (035) = SLC
-#     - Else = no inversions; could restrict analysis to these locations first
-# - eventually, could look at distance from station to grid cells, to deal with boundary issues
-#     - need coordinates for this
+#     - Davis (011) = Bountiful
+#     - Utah (049) = Lindon
+#     - Salt Lake (035) = Hawthorne
+#     - Restrict analysis to these locations first
 
 # get only births in counties with inversion models
-birth_inv <- birth_pt |>
+birth_wf <- birth_pt |>
   mutate(county_fips = str_sub(geoid, start = 3, end = 5)) |>
-  filter(county_fips %in% c("011", "057", "049", "035")) |>
-  mutate(inv_station = case_when(county_fips %in% c("011", "057") ~ "OGD",
-                                 county_fips == "049" ~ "PVO",
-                                 county_fips == "035" ~ "SLC"))
+  filter(county_fips %in% c("011", "049", "035")) |>
+  mutate(wf_station = case_when(county_fips %in% c("011") ~ "BT",
+                                county_fips == "049" ~ "LND",
+                                county_fips == "035" ~ "HW"))
 
 # probably the way to go is disaggregate to daily, then re-aggregate to weekly with n(inv_days)
 
-birth_days <- setDT(birth_inv)[ , list(momid = momid, 
+birth_days <- setDT(birth_wf)[ , list(momid = momid, 
                                        date = seq(gestation_wk_start, 
                                                   gestation_wk_end, by = "day"),
-                                       inv_station, gestation_week, #geoid,
+                                       wf_station, gestation_week, #geoid,
                                        poverty_rate, race, ethn, race_ethn,
                                        diabetes_pre, hypertension_pre, momage_c),
-                                by = 1:nrow(birth_inv)]
+                                by = 1:nrow(birth_wf)]
 
-birth_days_inv <- merge(birth_days, inv_dates, by.x = c("date", "inv_station"), 
-                        by.y = c("date", "station"), all.x = TRUE)
+birth_days_wf <- merge(birth_days, wf_dates, by.x = c("date", "wf_station"), 
+                       by.y = c("date", "station"), all.x = TRUE)
 
-birth_days_inv$inversion <- ifelse(is.na(birth_days_inv$inversion), 0, birth_days_inv$inversion)
+birth_days_wf$smoke <- ifelse(is.na(birth_days_wf$smoke), 0, birth_days_wf$smoke)
 
-birth_days_inv <- birth_days_inv |>
-  group_by(momid, gestation_week, inversion) |>
+birth_days_wf <- birth_days_wf |>
+  group_by(momid, gestation_week, smoke) |>
   tally()
 
-# think I can just take the inversion count?
-birth_days_inv <- birth_days_inv |>
-  filter(inversion == 1) #|>
-  # select(!inversion)
+# think I can just take the smoke count?
+birth_days_wf <- birth_days_wf |>
+  filter(smoke == 1) #|>
+  # select(!smoke)
 
-head(birth_days_inv)
+head(birth_days_wf)
 
-birth_inv <- merge(birth_inv, birth_days_inv, by = c("momid", "gestation_week"), all.x = TRUE)
+birth_wf <- merge(birth_wf, birth_days_wf, by = c("momid", "gestation_week"), all.x = TRUE)
 
-birth_inv$n <- ifelse(is.na(birth_inv$n), 0, birth_inv$n - 1)
+birth_wf$n <- ifelse(is.na(birth_wf$n), 0, birth_wf$n - 1)
 
-birth_inv$inversion <- ifelse(is.na(birth_inv$inversion), 0, 1)
+birth_wf$smoke <- ifelse(is.na(birth_wf$smoke), 0, 1)
 
-# table(birth_inv$n)
-
-# prop.table(table(birth_inv$n != 0)) # proportion of pregnancy weeks with inversion exposure
+# table(birth_wf$n)
+# prop.table(table(birth_wf$n != 0)) # proportion of pregnancy weeks with smoke exposure
 
 ```
 
 ```{r, echo = FALSE, results='hide'}
 
 # light cleaning
-birth_inv$preterm <- relevel(
-  as.factor(ifelse(birth_inv$gestation <= 37, 
+birth_wf$preterm <- relevel(
+  as.factor(ifelse(birth_wf$gestation <= 37, 
                    "preterm/early", "late/term")), ref = "late/term")
 
-birth_inv$n <- as.factor(birth_inv$n)
+birth_wf$n <- as.factor(birth_wf$n)
 
-birth_inv$gestation_week <- as.factor(birth_inv$gestation_week)
+birth_wf$gestation_week <- as.factor(birth_wf$gestation_week)
 
-birth_inv$race_ethn <- relevel(as.factor(birth_inv$race_ethn), ref = "white")
+birth_wf$race_ethn <- relevel(as.factor(birth_wf$race_ethn), ref = "white")
 
-birth_inv$early_preterm <- ifelse(birth_inv$gestation <= 37, 1, 0) # include "very" early and early
+birth_wf$early_preterm <- ifelse(birth_wf$gestation <= 37, 1, 0) # include "very" early and early
 
-birth_inv$max_inv_pm <- ifelse(birth_inv$n != 0, birth_inv$max_pm, 0)
+birth_wf$max_wf_pm <- ifelse(birth_wf$n != 0, birth_wf$max_pm, 0)
+birth_wf$max_nonwf_pm <- ifelse(birth_wf$n == 0, birth_wf$max_pm, 0)
 
 # how many person-weeks don't exist for later gestation?
-aggregate(birth_inv$early_preterm, by = list(birth_inv$gestation_week), FUN = sum)
+aggregate(birth_wf$early_preterm, by = list(birth_wf$gestation_week), FUN = sum)
 
 # only first 20 weeks; or not; using person-time, don't filter
-birth_inv_20 <- birth_inv# |>
+birth_wf_20 <- birth_wf# |>
   # filter(gestation >= 20)
 
 # check missingness
-summary(birth_inv_20[which(birth_inv_20$gestation_week == 32), "max_inv_pm"])
+summary(birth_wf_20[which(birth_wf_20$gestation_week == 32), "max_wf_pm"])
 
-# poverty is missing for 514 folks; fix later
-summary(birth_inv_20$poverty_rate)
+# poverty is missing for 318 folks; fix later
+# summary(birth_wf_20$poverty_rate)
+
+# ggplot(birth_wf_20, aes(x = smoke, y = max_pm)) + geom_density()
 
 ```
 
@@ -330,59 +333,116 @@ DLNM model:
 ```{r, out.width="150%"}
 
 # create crossbasis for exposure-lag-response
-cb1.inv_pm25 <- crossbasis(birth_inv_20$max_inv_pm, 
+# wf-specific pm2.5
+cb1.wf_pm25 <- crossbasis(birth_wf_20$max_wf_pm, 
                       lag = 37, 
                       argvar = list(fun = "ns", knots = 4), 
                       arglag = list(fun = "ns", knots = 4))
-summary(cb1.inv_pm25) # this describes the crossbasis functions and basis for the predictor and lag
+summary(cb1.wf_pm25) # this describes the crossbasis functions and basis for the predictor and lag
 
-# inversion
-cb1.inv <- crossbasis(birth_inv_20$inversion,
-                      lag = 37),
-                      # argvar = list(fun = "ns", knots = 3),
-                      arglag = list(fun = "ns", knots = 3))
-summary(cb1.inv) # this describes the crossbasis functions and basis for the predictor and lag
+#### non wildfire pm2.5
+cb1.nonwf_pm25 <- crossbasis(birth_wf_20$max_nonwf_pm, 
+                      lag = 37, 
+                      argvar = list(fun = "ns", knots = 4), 
+                      arglag = list(fun = "ns", knots = 4))
+summary(cb1.nonwf_pm25) 
+
+# smoke
+cb1.wf <- crossbasis(birth_wf_20$smoke,
+                      lag = 37,
+                      # argvar = list(fun = "lin"),
+                      arglag = list(fun = "ns", knots = 2))
+summary(cb1.wf) # this describes the crossbasis functions and basis for the predictor and lag
 
 # any PM2.5
-cb1.pm25 <- crossbasis(birth_inv_20$max_pm, 
+cb1.pm25 <- crossbasis(birth_wf_20$max_pm, 
                       lag = 37, 
                       argvar = list(fun = "ns", knots = 4), 
                       arglag = list(fun = "ns", knots = 4))
 summary(cb1.pm25) # this describes the crossbasis functions and basis for the predictor and lag
 
 # model
-model1 <- glm(early_preterm ~ cb1.inv_pm25 + 
-                cb1.pm25 + cb1.inv +
-                diabetes_pre + hypertension_pre + momage_c,
+model1 <- glm(early_preterm ~ cb1.wf_pm25 + cb1.nonwf_pm25,
+                # cb1.pm25 + cb1.wf, # +
+                # diabetes_pre + hypertension_pre + momage_c,
                 # poverty_rate + race_ethn, # adjusting for confounders
-                family = "binomial", birth_inv_20)
+                family = "binomial", birth_wf_20)
 summary(model1)
-# 3 knots: 1150449
-# 4 knots: 1150190
 
-# library(regclass)
-# VIF(model1)
+library(regclass)
+VIF(model1)
+
+crosspred(cb1.wf, model1, vcov = vcov(model1),
+          coef = names(coef(model1)))
+# 3 knots: ...
+# 4 knots: 1043491
+
+
+test <- glm(early_preterm ~ max_pm*smoke,# + max_wf_pm,
+            data = birth_wf_20, family = "binomial")
+summary(test)
+
+
+
+
 
 # get predictions for each exposure-lag
-pred1.inv_pm25 <- crosspred(cb1.inv_pm25, model1, at = 0:10*12,#0:120, 
+pred1.wf_pm25 <- crosspred(cb1.wf_pm25, model1, at = 0:10*20,#0:120, 
                        bylag = 1, cumul = TRUE, cen = 0)
+plot(pred1.wf_pm25, col = "red",
+     zlab = "Risk of PTB", 
+     ylab = "Gestational week", xlab = "Smoke-specific PM2.5")
 
-# pred1.inv <- crosspred(cb1.inv, model1)#, at = 0:1, bylag = 1,
+plot(pred1.wf_pm25, var = 200, #ylim = c(0.5, 1.2), 
+     ylab = "Odds ratios of preterm birth", 
+     xlab = "Gestational week")
+
+# pred1.wf <- crosspred(cb1.wf, model1)#, at = 0:1, bylag = 1,
                        # cumul = TRUE, cen = 0)#, #at = 0:120, 
                        # bylag = 1, cen = 0)#, cumul = TRUE, cen = 0)
+# plot(pred1.wf)
 
-pred1.pm25 <- crosspred(cb1.pm25, model1, at = 0:199, 
+pred1.pm25 <- crosspred(cb1.pm25, model1, at = 0:10*20, 
                        bylag = 1, cumul = TRUE, cen = 0)
+plot(pred1.pm25, col = "darkorange",
+     zlab = "Risk of PTB", 
+     ylab = "Gestational week", xlab = "PM2.5")
 
-# plot(pred1.inv)
-plot(pred1.pm25)
-plot(pred1.inv_pm25)
+crosspred(cb1.wf, model1, at = 0:1, 
+          bylag = 1, cumul = TRUE, cen = 0)
 
-# str(pred1.inv)
+crosspred(cb1.wf, model1, vcov = vcov(model1),
+          coef = names(coef(model1)))
+
+names(coef(model1)[14:16])
+
+coef(model1)[14:16]
+vcov(model1)[14:16, 14:16]
+
+parlist <- lapply(seq(cat), function(i) {
+  coef <- coef(model1)[i,][-1]
+  ind <- (i-1)*7+seq(6)+1
+  vcov <- vcov(model1)[ind,ind]
+  list(coef=coef, vcov=vcov)
+})
+names(parlist) <- cat
+
+# prediction
+cplist <- lapply(cat, function(x)
+  crosspred(cb1.inv, coef=parlist[[x]]$coef, vcov=parlist[[x]]$vcov, at=1, 
+    cumul=TRUE, cen=0)
+)
+
+
+
+
+
+
+# str(pred1.wf)
 
 # full exposure-lag-response surface
-plot(pred1.inv_pm25, zlab = "OR of preterm birth", 
-     ylab = "Gestational week", xlab = "Inversion-specific PM2.5",
+plot(pred1.wf_pm25, zlab = "OR of preterm birth", 
+     ylab = "Gestational week", xlab = "smoke-specific PM2.5",
      col = "white")
 
 plot(pred1.pm25, var = 150)
@@ -392,141 +452,102 @@ plot(pred1.pm25, var = 150)
 # https://www.airnow.gov/aqi/aqi-basics/
 
 # axis labels
-main_AQI50 = expression(paste("Inversion PM"[2.5], 
-                                 " = 9 µg/m" ^ 2, 
+main_AQI50 = expression(paste("smoke PM"[2.5], 
+                                 " = 9 µg/m" ^ 3, 
                                  " (AQI = 50)"))
-main_AQI100 = expression(paste("Inversion PM"[2.5], 
-                                  " = 35 µg/m" ^ 2, 
+main_AQI100 = expression(paste("smoke PM"[2.5], 
+                                  " = 35 µg/m" ^ 3, 
                                   " (AQI = 100)"))
-main_AQI150 = expression(paste("Inversion PM"[2.5], 
-                                  " = 55 µg/m" ^ 2, 
+main_AQI150 = expression(paste("smoke PM"[2.5], 
+                                  " = 55 µg/m" ^ 3, 
                                   " (AQI = 150)"))
-main_AQI200 = expression(paste("Inversion PM"[2.5], 
-                                  " = 119 µg/m" ^ 2, 
+main_AQI200 = expression(paste("smoke PM"[2.5], 
+                                  " = 119 µg/m" ^ 3, 
                                   " (AQI = 200)"))
 # curves # export with ht = 15
 par(mfrow = c(4, 1))
-plot(pred1.inv, var = 119, ylim = c(0.85, 1.65), 
+plot(pred1.wf_pm25, var = 120, ylim = c(0.5, 1.2), 
      ylab = "Odds ratios of preterm birth", 
-     xlab = "Gestational week", main = main_AQI200)
-plot(pred1.inv, var = 55, ylim = c(0.85, 1.65), 
+     xlab = "Gestational week")#, main = main_AQI200)
+plot(pred1.wf_pm25, var = 60, ylim = c(0.5, 1.2), 
      ylab = "Odds ratios of preterm birth", 
-     xlab = "Gestational week", main = main_AQI150)
-plot(pred1.inv, var = 35, ylim = c(0.85, 1.65), 
+     xlab = "Gestational week")#, main = main_AQI150)
+plot(pred1.wf_pm25, var = 36, ylim = c(0.5, 1.2), 
      ylab = "Odds ratios of preterm birth", 
-     xlab = "Gestational week", main = main_AQI100)
-plot(pred1.inv, var = 9, ylim = c(0.85, 1.65), 
+     xlab = "Gestational week")#, main = main_AQI100)
+plot(pred1.wf_pm25, var = 12, ylim = c(0.5, 1.2), 
      ylab = "Odds ratios of preterm birth", 
-     xlab = "Gestational week", main = main_AQI50)
+     xlab = "Gestational week")#, main = main_AQI50)
 dev.off()
 
-###############
-# given these plots, what exposure-lag-response effects would you want to interpret?
-# e.g., weeks 0-6 and 24-32 when AQI = 100
-###############
+
+# for any PM2.5
+par(mfrow = c(4, 1))
+plot(pred1.pm25, var = 120, ylim = c(0.85, 1.2), 
+     ylab = "Odds ratios of preterm birth", 
+     xlab = "Gestational week")#, main = main_AQI200)
+plot(pred1.pm25, var = 60, ylim = c(0.85, 1.2), 
+     ylab = "Odds ratios of preterm birth", 
+     xlab = "Gestational week")#, main = main_AQI150)
+plot(pred1.pm25, var = 40, ylim = c(0.85, 1.2), 
+     ylab = "Odds ratios of preterm birth", 
+     xlab = "Gestational week")#, main = main_AQI100)
+plot(pred1.pm25, var = 20, ylim = c(0.85, 1.2), 
+     ylab = "Odds ratios of preterm birth", 
+     xlab = "Gestational week")#, main = main_AQI50)
+dev.off()
 
 ```
 
-Odds ratios
-
-```{r}
-# low PM2.5
-overall_9 <- crosspred(cb1.inv_pm25, model1, at = 9, 
-                        cumul = FALSE, cen = 0,
-                        ci.level = 0.95)
-
-# at weeks 1, 37, and 25
-overall_9$matRRfit[2] # lag 1
-overall_9$matRRlow[2]
-overall_9$matRRhigh[2]
-overall_9$matRRfit[38] # lag 38
-overall_9$matRRlow[38]
-overall_9$matRRhigh[38]
-overall_9$matRRfit[26] # lag 25
-overall_9$matRRlow[26]
-overall_9$matRRhigh[26]
-
-
-for(i in c(2, 38, 26)) {
-  
-  print(paste0("For week = ", (i - 1)))
-  
-  for(j in c(9, 35, 55, 119)) {
-    
-    print(paste0("For PM2.5 = ", j))
-    
-    results <- crosspred(cb1.inv_pm25, model1, at = j, 
-                        cumul = FALSE, cen = 0,
-                        ci.level = 0.95)
-    
-    print(
-      paste0("RR: ",
-        round(results$matRRfit[i], 2),
-        ", 95% CI [",
-        round(results$matRRlow[i], 2),
-        ", ",
-        round(results$matRRhigh[i], 2),
-        "]"
-      )
-    )
-  }
-}
-
-# this RR is the overall relative risk, and low/high are the 95% confidence intervals
-print("Overall effect of 9 micrograms/m2 of PM2.5")
-paste0(round(overall_9$allRRfit[[1]], 2), ", 95% CI [", 
-       round(overall_9$allRRlow, 2), ", ", 
-       round(overall_9$allRRhigh, 2), "]")
-
-```
-
-
-
-
-Note that at some points, it appears that PM2.5 has a "protective effect". In reality, PM2.5 exposure is unlikely to decrease risk of preterm birth. In this case, it's useful to also look at the cumulative (or overall) effect of exposure. i.e., PM2.5 = 9 in early pregnancy may appear to decrease risk of preterm birth; but if someone were exposed to PM2.5 = 9 for their entire pregnancy, what would the overall effect be?
 
 ```{r}
 
-# create crosspredictions at the AQI thresholds see2 above
-# AQI = 50
-overall_9 <- crosspred(cb1.inv_pm25, model1, at = 9, 
-                        cumul = FALSE, cen = 0,
-                        ci.level = 0.95)
-# this RR is the overall relative risk, and low/high are the 95% confidence intervals
-print("Overall effect of 9 micrograms/m3 of PM2.5")
-paste0(round(overall_9$allRRfit[[1]], 2), ", 95% CI [", 
-       round(overall_9$allRRlow, 2), ", ", 
-       round(overall_9$allRRhigh, 2), "]")
+### days of WF smoke exposure
 
-# AQI = 100
-overall_35 <- crosspred(cb1.inv_pm25, model1, at = 35, 
-                        cumul = FALSE, cen = 0,
-                        ci.level = 0.95)
+summary(birth_wf$n)
 
-print("Overall effect of 35 micrograms/m3 of PM2.5")
-paste0(round(overall_35$allRRfit[[1]], 2), ", 95% CI [", 
-       round(overall_35$allRRlow, 2), ", ", 
-       round(overall_35$allRRhigh, 2), "]")
 
-# AQI = 150
-overall_55 <- crosspred(cb1.inv_pm25, model1, at = 55, 
-                        cumul = FALSE, cen = 0,
-                        ci.level = 0.95)
+cb_days <- crossbasis(birth_wf$n, 
+                      lag = 37, 
+                      argvar = list(fun = "ns", knots = 4), 
+                      arglag = list(fun = "ns", knots = 4))
+summary(cb_days) # this describes the crossbasis functions and basis for the predictor and lag
 
-print("Overall effect of 55 micrograms/m3 of PM2.5")
-paste0(round(overall_55$allRRfit[[1]], 2), ", 95% CI [", 
-       round(overall_55$allRRlow, 2), ", ", 
-       round(overall_55$allRRhigh, 2), "]")
+# model
+model1 <- glm(early_preterm ~ cb_days,# +
+                # diabetes_pre + hypertension_pre + momage_c,
+                #poverty_rate + race_ethn, # adjusting for confounders
+                family = "binomial", birth_wf_20)
+summary(model1)
 
-# AQI = 200
-overall_119 <- crosspred(cb1.inv_pm25, model1, at = 119, 
-                        cumul = FALSE, cen = 0,
-                        ci.level = 0.95)
+# ns: 1041806
+# bs: 1041779
 
-print("Overall effect of 119 micrograms/m3 of PM2.5")
-paste0(round(overall_119$allRRfit[[1]], 2), ", 95% CI [", 
-       round(overall_119$allRRlow, 2), ", ", 
-       round(overall_119$allRRhigh, 2), "]")
-# it's very unlikely (and impossible, in our dataset) to be exposed to 119 of inversion PM2.5 for an entire pregnancy, so we wouldn't place much emphasis on this particular interpretation
+# prediction
+pred1.wf_days <- crosspred(cb_days, model1, at = 0:7,#0:120, 
+                           bylag = 1, cumul = TRUE, cen = 0)
+plot(pred1.wf_days, zlab = "OR of preterm birth", 
+     ylab = "Gestational week", xlab = "Days of smoke exposure / week",
+     col = "purple")
+
+plot(pred1.wf_days, var = 7, #ylim = c(0.5, 1.2), 
+     ylab = "Odds ratios of preterm birth", 
+     xlab = "Gestational week",
+     main = "7 days of exposure")
+
 
 ```
+
+
+```{r}
+
+aggregate(birth_wf_20$gestation, by = list(birth_wf_20$smoke), FUN = mean)
+
+table(birth_wf_20$smoke, birth_wf_20$early_preterm)
+
+```
+
+
+
+
+
