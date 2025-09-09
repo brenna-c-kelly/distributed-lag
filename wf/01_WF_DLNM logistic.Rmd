@@ -334,18 +334,18 @@ DLNM model:
 
 # create crossbasis for exposure-lag-response
 # wf-specific pm2.5
-cb1.wf_pm25 <- crossbasis(birth_wf_20$max_wf_pm, 
+cb1.intx <- crossbasis(birth_wf_20$max_wf_pm, 
                       lag = 37, 
-                      argvar = list(fun = "ns", knots = 4), 
-                      arglag = list(fun = "ns", knots = 4))
-summary(cb1.wf_pm25) # this describes the crossbasis functions and basis for the predictor and lag
+                      argvar = list(fun = "bs", knots = 4), 
+                      arglag = list(fun = "bs", knots = 4))
+summary(cb1.intx) # this describes the crossbasis functions and basis for the predictor and lag
 
-#### non wildfire pm2.5
-cb1.nonwf_pm25 <- crossbasis(birth_wf_20$max_nonwf_pm, 
-                      lag = 37, 
-                      argvar = list(fun = "ns", knots = 4), 
-                      arglag = list(fun = "ns", knots = 4))
-summary(cb1.nonwf_pm25) 
+# #### non wildfire pm2.5
+# cb1.nonwf_pm25 <- crossbasis(birth_wf_20$max_nonwf_pm, 
+#                       lag = 37, 
+#                       argvar = list(fun = "ns", knots = 4), 
+#                       arglag = list(fun = "ns", knots = 4))
+# summary(cb1.nonwf_pm25) 
 
 # smoke
 cb1.wf <- crossbasis(birth_wf_20$smoke,
@@ -357,13 +357,13 @@ summary(cb1.wf) # this describes the crossbasis functions and basis for the pred
 # any PM2.5
 cb1.pm25 <- crossbasis(birth_wf_20$max_pm, 
                       lag = 37, 
-                      argvar = list(fun = "ns", knots = 4), 
-                      arglag = list(fun = "ns", knots = 4))
+                      argvar = list(fun = "bs", knots = 4), 
+                      arglag = list(fun = "bs", knots = 4))
 summary(cb1.pm25) # this describes the crossbasis functions and basis for the predictor and lag
 
 # model
-model1 <- glm(early_preterm ~ cb1.wf_pm25 + cb1.nonwf_pm25,
-                # cb1.pm25 + cb1.wf, # +
+model1 <- glm(early_preterm ~ cb1.intx + #cb1.nonwf_pm25,
+                cb1.pm25 + cb1.wf, # +
                 # diabetes_pre + hypertension_pre + momage_c,
                 # poverty_rate + race_ethn, # adjusting for confounders
                 family = "binomial", birth_wf_20)
@@ -374,6 +374,7 @@ VIF(model1)
 
 crosspred(cb1.wf, model1, vcov = vcov(model1),
           coef = names(coef(model1)))
+
 # 3 knots: ...
 # 4 knots: 1043491
 
@@ -381,11 +382,11 @@ crosspred(cb1.wf, model1, vcov = vcov(model1),
 test <- glm(early_preterm ~ max_pm*smoke,# + max_wf_pm,
             data = birth_wf_20, family = "binomial")
 summary(test)
+```
 
 
 
-
-
+```{r}
 # get predictions for each exposure-lag
 pred1.wf_pm25 <- crosspred(cb1.wf_pm25, model1, at = 0:10*20,#0:120, 
                        bylag = 1, cumul = TRUE, cen = 0)
@@ -500,6 +501,93 @@ dev.off()
 ```
 
 
+Briefly, multinomial
+
+```{r}
+
+library(nnet)
+
+birth_wf_20$preterm_cat <- case_when(birth_wf_20$gestation < 28 ~ "very early",
+                                     birth_wf_20$gestation < 32 ~ "just early",
+                                     birth_wf_20$gestation < 34 ~ "moderate",
+                                     birth_wf_20$gestation < 37 ~ "late",
+                                     birth_wf_20$gestation >= 37 ~ "term")
+birth_wf_20$preterm_cat <- relevel(as.factor(birth_wf_20$preterm_cat), ref = "term")
+
+model3 <- multinom(preterm_cat ~ cb1.intx + #cb1.nonwf_pm25,
+                cb1.pm25 + cb1.wf, # +
+              # diabetes_pre + hypertension_pre + momage_c,
+              # poverty_rate + race_ethn, # adjusting for confounders
+              birth_wf_20)
+summary(model3)
+
+# extract coef/vcov for various categories
+cat <- c("very early", "just early", "moderate", "late") # w/o reference
+
+cov_mat <- vcov(model3)
+
+cov_mat_names <- colnames(cov_mat)
+
+# colnames(cov_mat)[which(grepl(cat[1], colnames(cov_mat)) == TRUE)][-1] # not intercept, but all else
+
+# cov_mat[]
+# get the cov col/rows for each
+which(grepl(cat[1], colnames(cov_mat)) == TRUE)[-1]
+
+parlist <- lapply(seq(cat), function(i) {
+  coef <- coef(model3)[i,][-1]
+  ind <- which(grepl(cat[i], colnames(cov_mat)) == TRUE)[-1]
+  #colnames(cov_mat)[which(grepl(cat[i], colnames(cov_mat)) == TRUE)][-1] #(i-1)*19+seq(6)+1
+  vcov <- vcov(model3)[ind, ind] ###
+  list(coef=coef, vcov=vcov)
+})
+
+parlist
+
+
+
+str(cov_mat)
+cov_mat[1:63, ]
+
+names(parlist) <- cat
+
+# prediction
+
+for(i in 1:200) {
+  cplist <- lapply(cat, function(x)
+    crosspred(cb1.intx, coef=parlist[[x]]$coef, vcov=parlist[[x]]$vcov, at=i, 
+              cumul=TRUE, cen=0)
+  )
+}
+str(cplist)
+
+
+
+cplist <- lapply(cat, function(x)
+    crosspred(cb1.intx, coef=parlist[[x]]$coef, vcov=parlist[[x]]$vcov, at=1:20*10, 
+              cumul=TRUE, cen=0)
+  )
+str(cplist)
+
+
+cplist <- lapply(cat, function(x)
+  crosspred(cb1.intx, coef=parlist[[x]]$coef, vcov=parlist[[x]]$vcov, at=1, 
+    cumul=TRUE, cen=0)
+)
+
+we need
+
+names(cplist) <- c("very early", "just early", "moderate", "late")
+
+# now let's take this to dlnm functions and see if we can plot it
+cplist
+
+
+```
+
+
+
+
 ```{r}
 
 ### days of WF smoke exposure
@@ -509,22 +597,22 @@ summary(birth_wf$n)
 
 cb_days <- crossbasis(birth_wf$n, 
                       lag = 37, 
-                      argvar = list(fun = "ns", knots = 4), 
-                      arglag = list(fun = "ns", knots = 4))
+                      argvar = list(fun = "bs", knots = 3), 
+                      arglag = list(fun = "bs", knots = 3))
 summary(cb_days) # this describes the crossbasis functions and basis for the predictor and lag
 
 # model
-model1 <- glm(early_preterm ~ cb_days,# +
+model2 <- glm(early_preterm ~ cb_days,# +
                 # diabetes_pre + hypertension_pre + momage_c,
                 #poverty_rate + race_ethn, # adjusting for confounders
                 family = "binomial", birth_wf_20)
-summary(model1)
+summary(model2)
 
 # ns: 1041806
 # bs: 1041779
 
 # prediction
-pred1.wf_days <- crosspred(cb_days, model1, at = 0:7,#0:120, 
+pred1.wf_days <- crosspred(cb_days, model2, at = 0:7,#0:120, 
                            bylag = 1, cumul = TRUE, cen = 0)
 plot(pred1.wf_days, zlab = "OR of preterm birth", 
      ylab = "Gestational week", xlab = "Days of smoke exposure / week",
