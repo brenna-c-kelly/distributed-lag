@@ -387,6 +387,7 @@ summary(test)
 
 
 ```{r}
+
 # get predictions for each exposure-lag
 pred1.wf_pm25 <- crosspred(cb1.wf_pm25, model1, at = 0:10*20,#0:120, 
                        bylag = 1, cumul = TRUE, cen = 0)

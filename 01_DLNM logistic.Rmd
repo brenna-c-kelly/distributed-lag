@@ -164,7 +164,7 @@ birth <- birth_sorted[match(unique(birth_sorted$momid), birth_sorted$momid), ]
 
 # try to make long
 birth_l <- birth |>
-  pivot_longer(names_to = "exposure_week", cols = 17:368)
+  pivot_longer(names_to = "exposure_week", cols = 16:367)
 
 # tidy up
 birth_l <- birth_l |>
@@ -329,34 +329,49 @@ DLNM model:
 
 ```{r, out.width="150%"}
 
+# exclude prior to 20 and after 42
+birth_inv_20 <- birth_inv_20 |>
+  filter(gestation >= 20) |>
+  filter(gestation < 42)
+
 # create crossbasis for exposure-lag-response
-cb1.inv_pm25 <- crossbasis(birth_inv_20$max_inv_pm, 
+cb1.intx <- crossbasis(birth_inv_20$max_inv_pm, 
                       lag = 37, 
-                      argvar = list(fun = "ns", knots = 4), 
-                      arglag = list(fun = "ns", knots = 4))
-summary(cb1.inv_pm25) # this describes the crossbasis functions and basis for the predictor and lag
+                      argvar = list(fun = "bs", knots = 4,
+                                    Boundary.knots = c(0, 110)), 
+                      arglag = list(fun = "bs", knots = 4))
+summary(cb1.intx) # this describes the crossbasis functions and basis for the predictor and lag
 
 # inversion
 cb1.inv <- crossbasis(birth_inv_20$inversion,
-                      lag = 37),
-                      # argvar = list(fun = "ns", knots = 3),
-                      arglag = list(fun = "ns", knots = 3))
+                      lag = 37,
+                      # argvar = list(fun = "bs", knots = 3),
+                      arglag = list(fun = "bs", knots = 3))
 summary(cb1.inv) # this describes the crossbasis functions and basis for the predictor and lag
 
 # any PM2.5
 cb1.pm25 <- crossbasis(birth_inv_20$max_pm, 
                       lag = 37, 
-                      argvar = list(fun = "ns", knots = 4), 
-                      arglag = list(fun = "ns", knots = 4))
+                      argvar = list(fun = "bs", knots = 4), 
+                      arglag = list(fun = "bs", knots = 4))
 summary(cb1.pm25) # this describes the crossbasis functions and basis for the predictor and lag
 
 # model
-model1 <- glm(early_preterm ~ cb1.inv_pm25 + 
+model1 <- glm(early_preterm ~ cb1.intx + 
                 cb1.pm25 + cb1.inv +
                 diabetes_pre + hypertension_pre + momage_c,
                 # poverty_rate + race_ethn, # adjusting for confounders
                 family = "binomial", birth_inv_20)
 summary(model1)
+# intx bs, inv ns, pm bs
+# AIC: 1149884
+# intx bs, inv bs, pm bs
+# AIC: 1149884
+# intx bs, inv ns, pm ns
+# AIC: 1150049
+# intx bs, inv ns, pm bs
+# AIC: 1149886
+
 # 3 knots: 1150449
 # 4 knots: 1150190
 
@@ -364,19 +379,35 @@ summary(model1)
 # VIF(model1)
 
 # get predictions for each exposure-lag
-pred1.inv_pm25 <- crosspred(cb1.inv_pm25, model1, at = 0:10*12,#0:120, 
+pred1.inv_pm25 <- crosspred(cb1.intx, model1, at = 1:10*11,#0:120, 
                        bylag = 1, cumul = TRUE, cen = 0)
 
-# pred1.inv <- crosspred(cb1.inv, model1)#, at = 0:1, bylag = 1,
-                       # cumul = TRUE, cen = 0)#, #at = 0:120, 
+pred1.inv <- crosspred(cb1.inv, model1, at = 0:1, bylag = 1,
+                       cumul = TRUE, cen = 0)#, #at = 0:120,
                        # bylag = 1, cen = 0)#, cumul = TRUE, cen = 0)
 
-pred1.pm25 <- crosspred(cb1.pm25, model1, at = 0:199, 
+pred1.pm25 <- crosspred(cb1.pm25, model1, at = 1:10*11, 
                        bylag = 1, cumul = TRUE, cen = 0)
 
-# plot(pred1.inv)
-plot(pred1.pm25)
+pred1.inv_pm25$matRRfit
+
+# 30, 110
+IRR = 1.547264 / (1.025687 + 0.9866442)
+# IRR
+RERI = 1.547264 - 1.025687 - 0.9866442 + 1
+# RERI / 1.547264
+# 1, 110
+IRR = 0.7051769 / (1.158300 + 0.9958787)
+# IRR
+RERI = 0.7051769 - 1.158300 - 0.9958787 + 1
+# RERI / 1.547264
+
+
 plot(pred1.inv_pm25)
+plot(pred1.pm25)
+
+plot(pred1.inv)
+plot(pred1.inv, var = 1)
 
 # str(pred1.inv)
 
@@ -426,6 +457,249 @@ dev.off()
 ###############
 
 ```
+
+### sum up, for total effect  
+(in the near future)
+
+### heatmaps
+
+```{r}
+
+# plot(pred3.temp, "contour", xlab="Temperature", key.title=title("RR"),
+# plot.title=title("Contour plot",xlab="Temperature",ylab="Lag"))
+
+# get predictions for each exposure-lag
+pred1.inv_pm25 <- crosspred(cb1.intx, model1, at = 1:22*5,#0:120, 
+                       bylag = 1, cumul = TRUE, cen = 0)
+# plot(pred1.inv_pm25)
+
+rr_mat <- pred1.inv_pm25$matRRfit |> #cplist$`late`$matfit |> #pred1.wf_days$matRRfit |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         RR = value) |>
+  # mutate(RR = exp(RR)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+ci_lo_mat <- pred1.inv_pm25$matRRlow |> #cplist$`late`$matlow |>#pred1.wf_days$matRRlow |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         CI_lo = value) |>
+  # mutate(CI_lo = exp(CI_lo)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+ci_hi_mat <- pred1.inv_pm25$matRRhigh |> #cplist$`late`$mathigh |>#pred1.wf_days$matRRhigh |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         CI_hi = value) |>
+  # mutate(CI_hi = exp(CI_hi)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+rr <- merge(rr_mat, ci_lo_mat, by = c("exposure", "lag")) |>
+  merge(ci_hi_mat, by = c("exposure", "lag"))
+
+rr <- rr |>
+  filter(lag != 0)
+
+# statistical significance, for outline
+rr$significant <- case_when(rr$CI_lo > 1 & rr$CI_hi > 1 ~ "significant", 
+                            rr$CI_lo < 1 & rr$CI_hi < 1 ~ "significant")
+rr$significant <- ifelse(is.na(rr$significant), "not", "significant")
+
+# rr_significant <- rr |>
+#   filter(significant == "significant")
+
+rr_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = RR)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.49, 1.78)) +
+  geom_tile(data = rr[which(rr$significant == "significant"),],
+            fill = NA, color = "gray80", size = 0.25) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Relative Risk of Preterm Birth", 
+       x = "Gestational Week",
+       y = "Inversion-specific PM2.5 exposure")
+
+ci_lo_plot <- ggplot(ci_lo_mat, aes(x = lag, y = exposure, fill = CI_lo)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.49, 1.78)) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Lower 95% CI", 
+       x = "",
+       y = "", fill = "")
+
+ci_hi_plot <- ggplot(ci_hi_mat, aes(x = lag, y = exposure, fill = CI_hi)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.49, 1.78)) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Upper 95% CI", 
+       x = "",
+       y = "", fill = "")
+
+library(patchwork)
+
+rr_plot + (ci_hi_plot / ci_lo_plot)+# / plot_spacer()) +
+  plot_layout(widths = c(2.5, 1), guides = "collect")
+
+
+```
+
+
+### individual results
+
+```{r}
+
+rr |>
+  filter(significant == "significant") |>
+  filter(lag >= 15) |>
+  filter(exposure > 75)
+
+
+# how large of the low risk effects in early pregnancy
+rr |>
+  filter(significant == "significant") |>
+  filter(lag < 10) |>
+  filter(exposure > 80) |>
+  arrange(RR)
+
+
+```
+
+
+
+
+#### heatmap of PM2.5
+
+```{r}
+
+# get predictions for each exposure-lag
+pred1.pm25 <- crosspred(cb1.pm25, model1, at = 0:10*12,#0:120, 
+                        bylag = 1, cumul = TRUE, cen = 0)
+plot(pred1.pm25)
+
+rr_mat <- pred1.pm25$matRRfit |> #cplist$`late`$matfit |> #pred1.wf_days$matRRfit |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         RR = value) |>
+  # mutate(RR = exp(RR)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+ci_lo_mat <- pred1.pm25$matRRlow |> #cplist$`late`$matlow |>#pred1.wf_days$matRRlow |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         CI_lo = value) |>
+  # mutate(CI_lo = exp(CI_lo)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+ci_hi_mat <- pred1.pm25$matRRhigh |> #cplist$`late`$mathigh |>#pred1.wf_days$matRRhigh |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         CI_hi = value) |>
+  # mutate(CI_hi = exp(CI_hi)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+rr <- merge(rr_mat, ci_lo_mat, by = c("exposure", "lag")) |>
+  merge(ci_hi_mat, by = c("exposure", "lag"))
+
+rr <- rr |>
+  filter(lag != 0)
+
+# statistical significance, for outline
+rr$significant <- case_when(rr$CI_lo > 1 & rr$CI_hi > 1 ~ "significant", 
+                            rr$CI_lo < 1 & rr$CI_hi < 1 ~ "significant")
+rr$significant <- ifelse(is.na(rr$significant), "not", "significant")
+
+# rr_significant <- rr |>
+#   filter(significant == "significant")
+
+rr_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = RR)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.07, 3.10)) +
+  geom_tile(data = rr[which(rr$significant == "significant"),],
+            fill = NA, color = "orangered", size = 0.25) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Relative Risk of Preterm Birth", 
+       x = "Gestational Week",
+       y = "PM2.5 exposure")
+
+ci_lo_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = CI_lo)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.07, 3.10)) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Lower 95% CI", 
+       x = "",
+       y = "", fill = "")
+
+ci_hi_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = CI_hi)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.07, 3.10)) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Upper 95% CI", 
+       x = "",
+       y = "", fill = "")
+
+library(patchwork)
+
+rr_plot + (ci_hi_plot / ci_lo_plot)+# / plot_spacer()) +
+  plot_layout(widths = c(2.5, 1), guides = "collect")
+
+
+```
+
+Regardless of PM2.5 concentration or gestational week of exposure, PM2.5 is associated with increased risk of preterm birth, although many of these effects are modest. First trimester exposure (prior to week 13) to even moderate levels of PM2.5 are associated with greater risk of preterm birth. In particular, exposure to 12 micrograms/m3 in week 1 is associated with 27% greater risk (RR: 1.27 95% CI [1.06, 1.53]).
+
 
 Odds ratios
 
