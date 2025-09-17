@@ -335,7 +335,7 @@ birth_inv_20 <- birth_inv_20 |>
   filter(gestation < 42)
 
 # create crossbasis for exposure-lag-response
-cb1.intx <- crossbasis(birth_inv_20$max_inv_pm, 
+# cb1.intx <- crossbasis(birth_inv_20$max_inv_pm, 
                       lag = 37, 
                       argvar = list(fun = "bs", knots = 4,
                                     Boundary.knots = c(0, 110)), 
@@ -404,7 +404,7 @@ RERI = 0.7051769 - 1.158300 - 0.9958787 + 1
 
 
 plot(pred1.inv_pm25)
-plot(pred1.pm25)
+plot(pred1.pm25, var = 100)
 
 plot(pred1.inv)
 plot(pred1.inv, var = 1)
@@ -469,7 +469,7 @@ dev.off()
 # plot.title=title("Contour plot",xlab="Temperature",ylab="Lag"))
 
 # get predictions for each exposure-lag
-pred1.inv_pm25 <- crosspred(cb1.intx, model1, at = 1:22*5,#0:120, 
+pred1.inv_pm25 <- crosspred(cb1.intx, model1, at = 1:11*10,#0:120, 
                        bylag = 1, cumul = TRUE, cen = 0)
 # plot(pred1.inv_pm25)
 
@@ -577,7 +577,8 @@ rr_plot + (ci_hi_plot / ci_lo_plot)+# / plot_spacer()) +
 rr |>
   filter(significant == "significant") |>
   filter(lag >= 15) |>
-  filter(exposure > 75)
+  filter(exposure == 110) |>
+  arrange(lag)
 
 
 # how large of the low risk effects in early pregnancy
@@ -598,7 +599,7 @@ rr |>
 ```{r}
 
 # get predictions for each exposure-lag
-pred1.pm25 <- crosspred(cb1.pm25, model1, at = 0:10*12,#0:120, 
+pred1.pm25 <- crosspred(cb1.pm25, model1, at = 0:12*10,#0:120, 
                         bylag = 1, cumul = TRUE, cen = 0)
 plot(pred1.pm25)
 
@@ -656,7 +657,7 @@ rr_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = RR)) +
   geom_tile(colour = "gray70", linewidth = 0.0) +
   scale_fill_gradient2(low = "royalblue1", mid = "white", 
                        high = "orangered", midpoint = 1,
-                       limits = c(0.07, 3.10)) +
+                       limits = c(0.78, 1.54)) +
   geom_tile(data = rr[which(rr$significant == "significant"),],
             fill = NA, color = "orangered", size = 0.25) +
   theme_minimal() +
@@ -670,7 +671,7 @@ ci_lo_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = CI_lo)) +
   geom_tile(colour = "gray70", linewidth = 0.0) +
   scale_fill_gradient2(low = "royalblue1", mid = "white", 
                        high = "orangered", midpoint = 1,
-                       limits = c(0.07, 3.10)) +
+                       limits = c(0.78, 1.54)) +
   theme_minimal() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +
@@ -682,7 +683,7 @@ ci_hi_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = CI_hi)) +
   geom_tile(colour = "gray70", linewidth = 0.0) +
   scale_fill_gradient2(low = "royalblue1", mid = "white", 
                        high = "orangered", midpoint = 1,
-                       limits = c(0.07, 3.10)) +
+                       limits = c(0.78, 1.54)) +
   theme_minimal() +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0)) +
