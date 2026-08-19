@@ -29,8 +29,8 @@ birth <- read.csv("data/birth_exposures_with_confounders.csv") |>
   select(!momage)
 
 # get race, ethnicity
-mom_2013 <- fread('/Users/brenna/Downloads/births 2013+.csv')
-mom_2016 <- fread('/Users/brenna/Downloads/births 2016+.csv')
+mom_2013 <- fread('data/births 2013+.csv')
+mom_2016 <- fread('data/births 2016+.csv')
 
 mom_both <- rbind(mom_2013, mom_2016)
 
@@ -194,7 +194,8 @@ birth_l <- birth_l |>
 # get the outcome by momid
 preterm_momid <- birth_l |>
   select(c(momid, gestation, geoid, poverty_rate, race, ethn, race_ethn,
-           diabetes_pre, hypertension_pre, momage_c)) |>
+           diabetes_pre, hypertension_pre, momage_c, sga, plac_insuff,
+         preeclampsia, eclampsia, hypertension_gest)) |>
   distinct()
 
 birth_pt <- birth_l |> # person-time
@@ -259,12 +260,13 @@ birth_wf <- birth_pt |>
 # probably the way to go is disaggregate to daily, then re-aggregate to weekly with n(inv_days)
 
 birth_days <- setDT(birth_wf)[ , list(momid = momid, 
-                                       date = seq(gestation_wk_start, 
-                                                  gestation_wk_end, by = "day"),
-                                       wf_station, gestation_week, #geoid,
-                                       poverty_rate, race, ethn, race_ethn,
-                                       diabetes_pre, hypertension_pre, momage_c),
-                                by = 1:nrow(birth_wf)]
+                                      date = seq(gestation_wk_start, 
+                                                 gestation_wk_end, by = "day"),
+                                      wf_station, gestation_week, #geoid,
+                                      poverty_rate, race, ethn, race_ethn,
+                                      diabetes_pre, hypertension_pre, momage_c, sga, plac_insuff,
+                                      preeclampsia, eclampsia, hypertension_gest),
+                               by = 1:nrow(birth_wf)]
 
 birth_days_wf <- merge(birth_days, wf_dates, by.x = c("date", "wf_station"), 
                        by.y = c("date", "station"), all.x = TRUE)
@@ -335,54 +337,1295 @@ DLNM model:
 # create crossbasis for exposure-lag-response
 # wf-specific pm2.5
 cb1.intx <- crossbasis(birth_wf_20$max_wf_pm, 
-                      lag = 37, 
+                      lag = 36, 
                       argvar = list(fun = "bs", knots = 4), 
                       arglag = list(fun = "bs", knots = 4))
 summary(cb1.intx) # this describes the crossbasis functions and basis for the predictor and lag
 
-# #### non wildfire pm2.5
-# cb1.nonwf_pm25 <- crossbasis(birth_wf_20$max_nonwf_pm, 
-#                       lag = 37, 
-#                       argvar = list(fun = "ns", knots = 4), 
-#                       arglag = list(fun = "ns", knots = 4))
-# summary(cb1.nonwf_pm25) 
-
 # smoke
 cb1.wf <- crossbasis(birth_wf_20$smoke,
-                      lag = 37,
+                      lag = 36,
                       # argvar = list(fun = "lin"),
                       arglag = list(fun = "ns", knots = 2))
 summary(cb1.wf) # this describes the crossbasis functions and basis for the predictor and lag
 
 # any PM2.5
 cb1.pm25 <- crossbasis(birth_wf_20$max_pm, 
-                      lag = 37, 
+                      lag = 36, 
                       argvar = list(fun = "bs", knots = 4), 
                       arglag = list(fun = "bs", knots = 4))
 summary(cb1.pm25) # this describes the crossbasis functions and basis for the predictor and lag
 
+```
+
+
+```{r, out.width="150%"}
 # model
-model1 <- glm(early_preterm ~ cb1.intx + #cb1.nonwf_pm25,
-                cb1.pm25 + cb1.wf, # +
-                # diabetes_pre + hypertension_pre + momage_c,
-                # poverty_rate + race_ethn, # adjusting for confounders
+
+birth_wf_20$plac_insuff <- as.factor(birth_wf_20$plac_insuff)
+birth_wf_20$sga <- as.factor(birth_wf_20$sga)
+
+birth_wf_20 <- birth_wf_20 |>
+  filter(!is.na(poverty_rate)) |>
+  filter(!is.na(momage_c))
+
+length(unique(birth_wf_20$momid))
+
+model_pi <- glm(plac_insuff ~ cb1.intx + #cb1.nonwf_pm25,
+                  cb1.pm25 + cb1.wf +
+                  diabetes_pre + hypertension_pre + momage_c +
+                  poverty_rate + race_ethn, # adjusting for confounders
                 family = "binomial", birth_wf_20)
-summary(model1)
+summary(model_pi)
 
-library(regclass)
-VIF(model1)
+model_ptb <- glm(preterm ~ cb1.intx + #cb1.nonwf_pm25,
+                   cb1.pm25 + cb1.wf +
+                   diabetes_pre + hypertension_pre + momage_c +
+                   poverty_rate + race_ethn, # adjusting for confounders
+                 family = "binomial", birth_wf_20)
+summary(model_ptb)
 
-crosspred(cb1.wf, model1, vcov = vcov(model1),
-          coef = names(coef(model1)))
+model_sga <- glm(sga ~ cb1.intx + #cb1.nonwf_pm25,
+                   cb1.pm25 + cb1.wf +
+                   diabetes_pre + hypertension_pre + momage_c +
+                   poverty_rate + race_ethn, # adjusting for confounders
+                 family = "binomial", birth_wf_20)
+summary(model_sga)
+
+# non-wf pm model
+# cb1.pm25_nowf <- crossbasis(birth_wf_20$max_nonwf_pm, 
+#                             lag = 37, 
+#                             argvar = list(fun = "bs", knots = 4), 
+#                             arglag = list(fun = "bs", knots = 4))
+# 
+# # model
+# model2 <- glm(early_preterm ~ #cb1.intx + #cb1.nonwf_pm25,
+#                 cb1.pm25_nowf + #cb1.wf +
+#                 diabetes_pre + hypertension_pre + momage_c +
+#                 poverty_rate + race_ethn, # adjusting for confounders
+#                 family = "binomial", birth_wf_20)
+# summary(model2)
+# 
+# pred2.pm25 <- crosspred(cb1.pm25_nowf, model2, at = 1:200, 
+#                        bylag = 1, cumul = TRUE, cen = 0)
+# 
+# plot(pred2.pm25)
+# plot(pred2.pm25, var = 9)
+# plot(pred2.pm25, var = 35)
+# plot(pred2.pm25, var = 55)
+# plot(pred2.pm25, var = 200)
+
+
+# # just interaction model
+# model3 <- glm(early_preterm ~ cb1.pm25_nowf +
+#                 # cb1.wf + #cb1.wf +
+#                 diabetes_pre + hypertension_pre + momage_c +
+#                 poverty_rate + race_ethn, # adjusting for confounders
+#               family = "binomial", birth_wf_20)
+# summary(model3)
+# 
+# pred3.wf <- crosspred(cb1.pm25_nowf, model3, at = 0:200, 
+#                       bylag = 1, cumul = TRUE, cen = 0)
+
+# plot(pred3.wf)
+# plot(pred3.wf, var = 9)
+# plot(pred3.wf, var = 35)
+# plot(pred3.wf, var = 55)
+# 
+# plot(pred1.wf_pm25, var = 1)
+# plot(pred1.wf_pm25, var = 9)
+# plot(pred1.wf_pm25, var = 35)
+# plot(pred1.wf_pm25, var = 55)
+# plot(pred1.pm25, var = 9)
+# plot(pred1.wf, var = 1)
+# plot(pred1.wf_pm25)
+
+# aggregate(birth_wf_20$max_pm, by = list(birth_wf_20$smoke), FUN = mean)
+
+# ggplot(birth_wf_20, aes(x = max_pm)) +
+#   geom_histogram() +
+#   facet_wrap(~smoke, ncol = 1, scales = "free")
+
+# library(regclass)
+# VIF(model1)
+# 
+# crosspred(cb1.wf, model1, vcov = vcov(model1),
+#           coef = names(coef(model1)))
 
 # 3 knots: ...
 # 4 knots: 1043491
 
 
-test <- glm(early_preterm ~ max_pm*smoke,# + max_wf_pm,
-            data = birth_wf_20, family = "binomial")
-summary(test)
+#### PI
+# get predictions for each exposure-lag
+pred_pi.wf_pm25 <- crosspred(cb1.intx, model_pi, at = 1:200,
+                             bylag = 1, cumul = TRUE, cen = 0)
+
+pred_pi.wf <- crosspred(cb1.wf, model_pi, at = 0:1, bylag = 1,
+                        cumul = TRUE, cen = 0)
+
+pred_pi.pm25 <- crosspred(cb1.pm25, model_pi, at = 1:200, 
+                          bylag = 1, cumul = TRUE, cen = 0)
+
+#### PTB
+# get predictions for each exposure-lag
+pred_ptb.wf_pm25 <- crosspred(cb1.intx, model_ptb, at = 1:200,
+                              bylag = 1, cumul = TRUE, cen = 0)
+
+pred_ptb.wf <- crosspred(cb1.wf, model_ptb, at = 0:1, bylag = 1,
+                         cumul = TRUE, cen = 0)
+
+pred_ptb.pm25 <- crosspred(cb1.pm25, model_ptb, at = 1:200, 
+                           bylag = 1, cumul = TRUE, cen = 0)
+
+#### SGA
+# get predictions for each exposure-lag
+pred_sga.wf_pm25 <- crosspred(cb1.intx, model_sga, at = 1:200,
+                              bylag = 1, cumul = TRUE, cen = 0)
+
+pred_sga.wf <- crosspred(cb1.wf, model_sga, at = 0:1, bylag = 1,
+                         cumul = TRUE, cen = 0)
+
+pred_sga.pm25 <- crosspred(cb1.pm25, model_sga, at = 1:200, 
+                           bylag = 1, cumul = TRUE, cen = 0)
+
 ```
+
+
+## total effect of exposure, w/ plots
+
+```{r}
+
+### function to get predicted total effects
+
+fx_intx <- function(pm_value_char, wf_value_char, weeks_range, 
+                    # cross-predictions
+                    xp_intx, xp_wf, xp_pm) {
+  
+  ll <- exp(log(xp_intx$matRRlow[pm_value_char, weeks_range]) +
+           # log(xp_wf$matRRlow[wf_value_char, weeks_range]) +
+           log(xp_pm$matRRlow[pm_value_char, weeks_range]))
+  
+  hh <- exp(log(xp_intx$matRRhigh[pm_value_char, weeks_range]) +
+           # log(xp_wf$matRRhigh[wf_value_char, weeks_range]) +
+           log(xp_pm$matRRhigh[pm_value_char, weeks_range]))
+  
+  fx <- exp(xp_intx$matfit[pm_value_char, weeks_range] +
+           # xp_wf$matfit[wf_value_char, weeks_range] +
+           xp_pm$matfit[pm_value_char, weeks_range])
+  
+  data.frame(week = 0:36,
+             pm = as.numeric(pm_value_char),
+             ll,
+             hh,
+             fx) |>
+    mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+    filter(week != 0)
+  
+}
+
+# getting results for each outcome
+
+#### PI
+# for PM = 9
+res_pi_9 <- fx_intx("9", "1", 1:37,
+                    pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25)
+# for PM = 35
+res_pi_35 <- fx_intx("35", "1", 1:37,
+                    pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25) 
+# for PM = 55
+res_pi_55 <- fx_intx("55", "1", 1:37,
+                    pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25)
+# for PM = 125
+res_pi_125 <- fx_intx("125", "1", 1:37,
+                      pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25)
+# for PM = 175
+res_pi_175 <- fx_intx("175", "1", 1:37,
+                      pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25)
+#### PTB
+# for PM = 9
+res_ptb_9 <- fx_intx("9", "1", 1:37,
+                    pred_ptb.wf_pm25, pred_ptb.wf, pred_ptb.pm25)
+# for PM = 35
+res_ptb_35 <- fx_intx("35", "1", 1:37,
+                    pred_ptb.wf_pm25, pred_ptb.wf, pred_ptb.pm25) 
+# for PM = 55
+res_ptb_55 <- fx_intx("55", "1", 1:37,
+                    pred_ptb.wf_pm25, pred_ptb.wf, pred_ptb.pm25)
+# for PM = 125
+res_ptb_125 <- fx_intx("125", "1", 1:37,
+                      pred_ptb.wf_pm25, pred_ptb.wf, pred_ptb.pm25)
+# for PM = 175
+res_ptb_175 <- fx_intx("175", "1", 1:37,
+                      pred_ptb.wf_pm25, pred_ptb.wf, pred_ptb.pm25)
+#### SGA
+# for PM = 9
+res_sga_9 <- fx_intx("9", "1", 1:37,
+                    pred_sga.wf_pm25, pred_sga.wf, pred_sga.pm25)
+# for PM = 35
+res_sga_35 <- fx_intx("35", "1", 1:37,
+                    pred_sga.wf_pm25, pred_sga.wf, pred_sga.pm25) 
+# for PM = 55
+res_sga_55 <- fx_intx("55", "1", 1:37,
+                    pred_sga.wf_pm25, pred_sga.wf, pred_sga.pm25)
+# for PM = 125
+res_sga_125 <- fx_intx("125", "1", 1:37,
+                      pred_sga.wf_pm25, pred_sga.wf, pred_sga.pm25)
+# for PM = 175
+res_sga_175 <- fx_intx("175", "1", 1:37,
+                      pred_sga.wf_pm25, pred_sga.wf, pred_sga.pm25)
+
+#### plot function
+
+plt_fx <- function(res_data_9, res_data_35,
+                   res_data_55, res_data_125,
+                   res_data_175, outcome, outcome_abbreviation) {
+  
+  clean_labels <- c("9" = 'PM  = 9 (AQI = 50, "Healthy")',
+                    "35" = 'PM  = 35 (AQI = 100, "Moderate")',
+                    "55" = 'PM  = 55 (AQI = 150, "Unhealthy for Sensitive Groups")',
+                    "125" = 'PM  = 125 (AQI = 200, "Unhealthy")',
+                    "175" = 'PM  = 175 (AQI = 250), "Very Unhealthy"')
+  
+  rbind(res_data_9,
+        res_data_35,
+        res_data_55,
+        res_data_125,
+        res_data_175) |>
+    mutate(pm = factor(pm, levels = c(175, 125, 55, 35, 9))) |>
+    ggplot(aes(y = week, color = sig)) +
+    geom_point(aes(x = fx), size = 1) +
+    geom_linerange(aes(xmin = ll, xmax = hh)) +
+    scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+    labs(title = outcome,
+           #paste0("Odds Ratios of", outcome, " across WF-related PM"),
+      # subtitle = "",
+      x = paste("OR of\n", outcome_abbreviation), 
+      y = "Gestational week of exposure") +
+    geom_vline(xintercept = 1, linetype = "dashed") +
+    geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+               linetype = "dotted", alpha = 0.5) +
+    geom_vline(xintercept = seq(from = 1, to = 3, by = 0.5),
+               linetype = "dotted") +
+    geom_vline(xintercept = 0.5, linetype = "dotted") +
+    scale_x_log10(limits = c(0.17, 4.79), 
+                  breaks = c(0.5, 1, 1.5, 2, 2.5, 3)) +
+    coord_flip() +
+    theme_classic() +
+    theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +
+    facet_wrap(~ pm, ncol = 1, labeller = labeller(pm = clean_labels))
+  
+}
+
+
+### creating plots for each outcome
+plt_pi <- plt_fx(res_pi_9, res_pi_35,
+                 res_pi_55, res_pi_125,
+                 res_pi_175, " Placental insufficiency", "PI")
+
+plt_ptb <- plt_fx(res_ptb_9, res_ptb_35,
+                  res_ptb_55, res_ptb_125,
+                  res_ptb_175, " Preterm birth", "PTB")
+
+plt_sga <- plt_fx(res_sga_9, res_sga_35,
+                  res_sga_55, res_sga_125,
+                  res_sga_175, " Small-for-gestational-age", "SGA")
+
+# plot together
+library(ggpubr)
+# ggarrange(plt_pi, plt_ptb, plt_sga, nrow = 1)
+
+# alternatively
+annotate_figure(ggarrange(plt_pi, plt_ptb, plt_sga, nrow = 1),
+                top = text_grob("Odds ratios across WF-related PM  values", 
+                                color = "black", face = "bold", size = 14,
+                                hjust = 0, x = 0.06))
+# exported as 12 x 12
+
+```
+
+
+Deprecated: plots the old way
+
+```{r}
+# # for PM = 9
+# res_pi_9 <- fx_intx("9", "1", 1:37,
+#                     pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25)# |>
+#   mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+#   filter(week != 0)
+# 
+# plt_9 <- res_pm_9 |>
+#   ggplot(aes(y = week, color = sig)) +
+#   geom_point(aes(x = fx), size = 1) +
+#   geom_linerange(aes(xmin = ll, xmax = hh)) +
+#   scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+#   labs(title = expression(
+#     paste("WF-specific PM"[2.5], 
+#           " = 9 µg/m" ^ 3, 
+#           " (AQI = 50)")),# and preterm birth")),
+#     # subtitle = "",
+#     x = "OR of \nplacental \ninsufficiency", 
+#     y = "Gestational week of exposure") +
+#   geom_vline(xintercept = 1, linetype = "dashed") +
+#   geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+#              linetype = "dotted", alpha = 0.5) +
+#   # xlim(0.8, 1.7) +
+#   coord_flip() +
+#   theme_classic() +
+#   theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+# 
+# # for PM = 35
+# res_pi_35 <- fx_intx("35", "1", 1:37,
+#                     pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25) #|>
+#   mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+#   filter(week != 0)
+# 
+# plt_35 <- res_pm_35 |>
+#   ggplot(aes(y = week, color = sig)) +
+#   geom_point(aes(x = fx), size = 1) +
+#   geom_linerange(aes(xmin = ll, xmax = hh)) +
+#   scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+#   labs(title = expression(
+#     paste("WF-specific PM"[2.5], 
+#           " = 35 µg/m" ^ 3, 
+#           " (AQI = 100)")),# and preterm birth")),
+#     # subtitle = "",
+#     x = "OR of \nplacental \ninsufficiency", 
+#     y = "Gestational week of exposure") +
+#   geom_vline(xintercept = 1, linetype = "dashed") +
+#   geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+#              linetype = "dotted", alpha = 0.5) +
+#   # xlim(0.8, 1.7) +
+#   coord_flip() +
+#   theme_classic() +
+#   theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+# 
+# # for PM = 55
+# res_pi_55 <- fx_intx("55", "1", 1:37,
+#                     pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25)# |>
+#   mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+#   filter(week != 0)
+# 
+# plt_55 <- res_pm_55 |>
+#   ggplot(aes(y = week, color = sig)) +
+#   geom_point(aes(x = fx), size = 1) +
+#   geom_linerange(aes(xmin = ll, xmax = hh)) +
+#   scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+#   labs(title = expression(
+#     paste("WF-specific PM"[2.5], 
+#           " = 55 µg/m" ^ 3, 
+#           " (AQI = 150)")),# and preterm birth")),
+#     # subtitle = "",
+#     x = "OR of \npreterm \nbirth", 
+#     y = "Gestational week of exposure") +
+#   geom_vline(xintercept = 1, linetype = "dashed") +
+#   geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+#              linetype = "dotted", alpha = 0.5) +
+#   # xlim(0.8, 1.7) +
+#   coord_flip() +
+#   theme_classic() +
+#   theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+# 
+# # for PM = 125
+# res_pi_125 <- fx_intx("125", "1", 1:37,
+#                       pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25) #|>
+#   mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+#   filter(week != 0)
+# 
+# plt_125 <- res_pm_125 |>
+#   ggplot(aes(y = week, color = sig)) +
+#   geom_point(aes(x = fx), size = 1) +
+#   geom_linerange(aes(xmin = ll, xmax = hh)) +
+#   scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+#   labs(title = expression(
+#     paste("WF-specific PM"[2.5], 
+#           " = 125 µg/m" ^ 3, 
+#           " (AQI = 200)")),# and preterm birth")),
+#     # subtitle = "",
+#     x = "OR of \npreterm \nbirth", 
+#     y = "Gestational week of exposure") +
+#   geom_vline(xintercept = 1, linetype = "dashed") +
+#   geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+#              linetype = "dotted", alpha = 0.5) +
+#   # xlim(0.35, 2.25) +
+#   coord_flip() +
+#   theme_classic() +
+#   theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+# 
+# # for PM = 175
+# res_pi_175 <- fx_intx("175", "1", 1:37,
+#                       pred_pi.wf_pm25, pred_pi.wf, pred_pi.pm25) #|>
+#   mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+#   filter(week != 0)
+# 
+# plt_175 <- res_pm_175 |>
+#   ggplot(aes(y = week, color = sig)) +
+#   geom_point(aes(x = fx), size = 1) +
+#   geom_linerange(aes(xmin = ll, xmax = hh)) +
+#   scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+#   labs(title = expression(
+#     paste("WF-specific PM"[2.5], 
+#           " = 175 µg/m" ^ 3, 
+#           " (AQI = 250)")),# and preterm birth")),
+#     # subtitle = "",
+#     x = "OR of \npreterm \nbirth", 
+#     y = "Gestational week of exposure") +
+#   geom_vline(xintercept = 1, linetype = "dashed") +
+#   geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+#              linetype = "dotted", alpha = 0.5) +
+#   # xlim(0.35, 2.25) +
+#   coord_flip() +
+#   theme_classic() +
+#   theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+# 
+# ggarrange(plt_175,
+#           plt_125,
+#           plt_55,
+#           plt_35, 
+#           plt_9, 
+#           nrow = 5)
+```
+
+
+
+### comparison to non-wildfire PM
+
+```{r}
+
+
+### function to get predicted total effects NON-WILDFIRE
+
+fx_intx_nonwf <- function(pm_value_char, weeks_range, 
+                          # cross-predictions
+                          xp_pm) {
+  
+  ll <- exp(log(xp_pm$matRRlow[pm_value_char, weeks_range]))
+  
+  hh <- exp(log(xp_pm$matRRhigh[pm_value_char, weeks_range]))
+  
+  fx <- exp(xp_pm$matfit[pm_value_char, weeks_range])
+  
+  se <- xp_pm$matse[pm_value_char, weeks_range]
+  
+  data.frame(week = 1:37,
+             ll,
+             hh,
+             fx)
+  
+}
+
+#### for placental insufficiency
+
+# for PM = 9
+nwf_res_pm_9 <- fx_intx_nonwf("9", 1:37, pred_pi.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 35
+nwf_res_pm_35 <- fx_intx_nonwf("35", 1:37, pred_pi.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 55
+nwf_res_pm_55 <- fx_intx_nonwf("55", 1:37, pred_pi.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 125
+nwf_res_pm_125 <- fx_intx_nonwf("125", 1:37, pred_pi.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 175
+nwf_res_pm_175 <- fx_intx_nonwf("175", 1:37, pred_pi.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+
+# combine wildfire and non-wildfire
+res_pi_9_wfnwf <- merge(res_pi_9, nwf_res_pm_9, by = "week")
+res_pi_9_wfnwf$diff <- (exp(log(res_pi_9_wfnwf$fx.x) - log(res_pi_9_wfnwf$fx.y)) - 1) #* 100
+res_pi_9_wfnwf$level <- 9
+plot(res_pi_9_wfnwf$diff)
+res_pi_9_wfnwf |>
+  filter(sig.x == "yes")
+
+res_pi_35_wfnwf <- merge(res_pi_35, nwf_res_pm_35, by = "week")
+res_pi_35_wfnwf$diff <- (exp(log(res_pi_35_wfnwf$fx.x) - log(res_pi_35_wfnwf$fx.y)) - 1)# * 100
+res_pi_35_wfnwf$level <- 35
+plot(res_pi_35_wfnwf$diff)
+res_pi_35_wfnwf |> filter(sig.x == "yes")
+
+res_pi_55_wfnwf <- merge(res_pi_55, nwf_res_pm_55, by = "week")
+res_pi_55_wfnwf$diff <- (exp(log(res_pi_55_wfnwf$fx.x) - log(res_pi_55_wfnwf$fx.y)) - 1)# * 100
+res_pi_55_wfnwf$level <- 55
+plot(res_pi_55_wfnwf$diff)
+
+res_pi_125_wfnwf <- merge(res_pi_125, nwf_res_pm_125, by = "week")
+res_pi_125_wfnwf$diff <- (exp(log(res_pi_125_wfnwf$fx.x) - log(res_pi_125_wfnwf$fx.y)) - 1)# * 100
+res_pi_125_wfnwf$level <- 125
+plot(res_pi_125_wfnwf$diff)
+
+res_pi_175_wfnwf <- merge(res_pi_175, nwf_res_pm_175, by = "week")
+res_pi_175_wfnwf$diff <- (exp(log(res_pi_175_wfnwf$fx.x) - log(res_pi_175_wfnwf$fx.y)) - 1)# * 100
+res_pi_175_wfnwf$level <- 175
+plot(res_pi_175_wfnwf$diff)
+
+# plot the relative difference
+pi_comparison <- rbind(res_pi_9_wfnwf,
+      res_pi_35_wfnwf,
+      res_pi_55_wfnwf,
+      res_pi_125_wfnwf,
+      res_pi_175_wfnwf) |>
+  mutate(level = as.factor(level),
+         diff = diff*100) |>
+  ggplot(aes(y = week, color = level)) +
+  geom_point(aes(x = diff), size = 1) +
+  geom_path(aes(x = diff)) +
+  scale_color_brewer(palette = "Reds") +
+  labs(title = "Placental insufficiency",
+       x = paste("%"), 
+       y = "Gestational week of exposure") +
+  geom_vline(xintercept = seq(from = -50, to = 300, by = 50),
+  linetype = "dotted") +
+  coord_flip() +
+  scale_x_continuous(limits = c(-55, 330)) +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +
+  guides(color = guide_legend(reverse = TRUE, title = "PM2.5 level"))
+
+
+#### for preterm birth
+# for PM = 9
+nwf_res_ptb_9 <- fx_intx_nonwf("9", 1:37, pred_ptb.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 35
+nwf_res_ptb_35 <- fx_intx_nonwf("35", 1:37, pred_ptb.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 55
+nwf_res_ptb_55 <- fx_intx_nonwf("55", 1:37, pred_ptb.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 125
+nwf_res_ptb_125 <- fx_intx_nonwf("125", 1:37, pred_ptb.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 175
+nwf_res_ptb_175 <- fx_intx_nonwf("175", 1:37, pred_ptb.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+
+# combine wildfire and non-wildfire
+res_ptb_9_wfnwf <- merge(res_ptb_9, nwf_res_ptb_9, by = "week")
+res_ptb_9_wfnwf$diff <- (exp(log(res_ptb_9_wfnwf$fx.x) - log(res_ptb_9_wfnwf$fx.y)) - 1) #* 100
+res_ptb_9_wfnwf$level <- 9
+plot(res_ptb_9_wfnwf$diff)
+res_ptb_9_wfnwf |>
+  filter(sig.x == "yes")
+
+res_ptb_35_wfnwf <- merge(res_ptb_35, nwf_res_ptb_35, by = "week")
+res_ptb_35_wfnwf$diff <- (exp(log(res_ptb_35_wfnwf$fx.x) - log(res_ptb_35_wfnwf$fx.y)) - 1)# * 100
+res_ptb_35_wfnwf$level <- 35
+plot(res_ptb_35_wfnwf$diff)
+res_ptb_35_wfnwf |> filter(sig.x == "yes")
+
+res_ptb_55_wfnwf <- merge(res_ptb_55, nwf_res_ptb_55, by = "week")
+res_ptb_55_wfnwf$diff <- (exp(log(res_ptb_55_wfnwf$fx.x) - log(res_ptb_55_wfnwf$fx.y)) - 1)# * 100
+res_ptb_55_wfnwf$level <- 55
+plot(res_ptb_55_wfnwf$diff)
+
+res_ptb_125_wfnwf <- merge(res_ptb_125, nwf_res_ptb_125, by = "week")
+res_ptb_125_wfnwf$diff <- (exp(log(res_ptb_125_wfnwf$fx.x) - log(res_ptb_125_wfnwf$fx.y)) - 1)# * 100
+res_ptb_125_wfnwf$level <- 125
+plot(res_ptb_125_wfnwf$diff)
+
+res_ptb_175_wfnwf <- merge(res_ptb_175, nwf_res_ptb_175, by = "week")
+res_ptb_175_wfnwf$diff <- (exp(log(res_ptb_175_wfnwf$fx.x) - log(res_ptb_175_wfnwf$fx.y)) - 1)# * 100
+res_ptb_175_wfnwf$level <- 175
+plot(res_ptb_175_wfnwf$diff)
+
+# plot the relative difference
+ptb_comparison <- rbind(res_ptb_9_wfnwf,
+      res_ptb_35_wfnwf,
+      res_ptb_55_wfnwf,
+      res_ptb_125_wfnwf,
+      res_ptb_175_wfnwf) |>
+  mutate(level = as.factor(level),
+         diff = diff*100) |>
+  ggplot(aes(y = week, color = level)) +
+  geom_point(aes(x = diff), size = 1) +
+  geom_path(aes(x = diff)) +
+  scale_color_brewer(palette = "Blues") +
+  labs(title = "Preterm birth",
+       x = paste("%"), 
+       y = "Gestational week of exposure") +
+  geom_vline(xintercept = seq(from = -50, to = 300, by = 50),
+  linetype = "dotted") +
+  coord_flip() +
+  scale_x_continuous(limits = c(-55, 330)) +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +
+  guides(color = guide_legend(reverse = TRUE, title = "PM2.5 level"))
+
+
+#### for SGA
+
+# for PM = 9
+nwf_res_sga_9 <- fx_intx_nonwf("9", 1:37, pred_sga.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 35
+nwf_res_sga_35 <- fx_intx_nonwf("35", 1:37, pred_sga.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 55
+nwf_res_sga_55 <- fx_intx_nonwf("55", 1:37, pred_sga.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 125
+nwf_res_sga_125 <- fx_intx_nonwf("125", 1:37, pred_sga.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+# for PM = 175
+nwf_res_sga_175 <- fx_intx_nonwf("175", 1:37, pred_sga.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+
+# combine wildfire and non-wildfire
+res_sga_9_wfnwf <- merge(res_sga_9, nwf_res_sga_9, by = "week")
+res_sga_9_wfnwf$diff <- (exp(log(res_sga_9_wfnwf$fx.x) - log(res_sga_9_wfnwf$fx.y)) - 1) #* 100
+res_sga_9_wfnwf$level <- 9
+plot(res_sga_9_wfnwf$diff)
+res_sga_9_wfnwf |>
+  filter(sig.x == "yes")
+
+res_sga_35_wfnwf <- merge(res_sga_35, nwf_res_sga_35, by = "week")
+res_sga_35_wfnwf$diff <- (exp(log(res_sga_35_wfnwf$fx.x) - log(res_sga_35_wfnwf$fx.y)) - 1)# * 100
+res_sga_35_wfnwf$level <- 35
+plot(res_sga_35_wfnwf$diff)
+res_sga_35_wfnwf |> filter(sig.x == "yes")
+
+res_sga_55_wfnwf <- merge(res_sga_55, nwf_res_sga_55, by = "week")
+res_sga_55_wfnwf$diff <- (exp(log(res_sga_55_wfnwf$fx.x) - log(res_sga_55_wfnwf$fx.y)) - 1)# * 100
+res_sga_55_wfnwf$level <- 55
+plot(res_sga_55_wfnwf$diff)
+
+res_sga_125_wfnwf <- merge(res_sga_125, nwf_res_sga_125, by = "week")
+res_sga_125_wfnwf$diff <- (exp(log(res_sga_125_wfnwf$fx.x) - log(res_sga_125_wfnwf$fx.y)) - 1)# * 100
+res_sga_125_wfnwf$level <- 125
+plot(res_sga_125_wfnwf$diff)
+
+res_sga_175_wfnwf <- merge(res_sga_175, nwf_res_sga_175, by = "week")
+res_sga_175_wfnwf$diff <- (exp(log(res_sga_175_wfnwf$fx.x) - log(res_sga_175_wfnwf$fx.y)) - 1)# * 100
+res_sga_175_wfnwf$level <- 175
+plot(res_sga_175_wfnwf$diff)
+
+# plot the relative difference
+sga_comparison <- rbind(res_sga_9_wfnwf,
+      res_sga_35_wfnwf,
+      res_sga_55_wfnwf,
+      res_sga_125_wfnwf,
+      res_sga_175_wfnwf) |>
+  mutate(level = as.factor(level),
+         diff = diff*100) |>
+  ggplot(aes(y = week, color = level)) +
+  geom_point(aes(x = diff), size = 1) +
+  geom_path(aes(x = diff)) +
+  scale_color_brewer(palette = "Purples") +
+  labs(title = "Small-for-gestational-age",
+       x = paste("%"), 
+       y = "Gestational week of exposure") +
+  geom_vline(xintercept = seq(from = -50, to = 300, by = 50),
+  linetype = "dotted") +
+  coord_flip() +
+  scale_x_continuous(limits = c(-55, 330)) +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +
+  guides(color = guide_legend(reverse = TRUE, title = "PM2.5 level"))
+
+
+ggarrange(pi_comparison, 
+          ptb_comparison, 
+          sga_comparison, nrow = 1)
+
+
+annotate_figure(ggarrange(pi_comparison, 
+                          ptb_comparison, 
+                          sga_comparison, nrow = 1),
+                top = text_grob("Relative effect of wildfire-related PM2.5 compared to non-wildfire PM2.5", 
+                                color = "black", face = "bold", size = 14,
+                                hjust = 0, x = 0.04),
+                bottom = text_grob(
+                                  "Higher % indicates wildfire-related PM2.5 is worse for the outcome.",
+                                  color = "grey30", 
+                                  face = "italic", 
+                                  size = 11, 
+                                  hjust = 1, 
+                                  x = 0.4
+                                ))
+
+# exported as 12 x 4
+
+
+
+
+
+
+
+
+rbind(res_200, res_55, res_35, res_9) |>
+  # group_by(week, level) |>
+  filter(sig.x == "yes") |>
+  slice_max(fx.x)
+  # summarize(max = max(diff))
+
+
+
+res_55 |>
+  ggplot(aes(y = week, color = sig.x)) +
+  geom_point(aes(x = diff), size = 1) +
+  # geom_linerange(aes(xmin = ll, xmax = hh)) +
+  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+  labs(title = expression(
+    paste("non-WF PM"[2.5],
+          " = 9 µg/m" ^ 3,
+          " (AQI = 50)")),# and preterm birth")),
+    # subtitle = "",
+    x = "OR of \npreterm \nbirth",
+    y = "Gestational week of exposure") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_hline(yintercept = seq(from = 5, to = 35, by = 5),
+             linetype = "dotted", alpha = 0.5) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+
+
+
+
+```
+
+### other outcomes?
+
+```{r}
+
+
+# birth_wf_20$sga <- as.factor(birth_wf_20$sga)
+
+# model
+model_sga <- glm(preterm ~ cb1.nonwf_pm25 + #cb1.intx + ,
+                   # cb1.pm25 + cb1.wf +
+                   diabetes_pre + hypertension_pre + momage_c +
+                   poverty_rate + race_ethn, # adjusting for confounders
+                 family = "binomial", birth_wf_20)
+summary(model_sga)
+
+
+
+# get predictions for each exposure-lag
+pred_sga.wf_pm25 <- crosspred(cb1.intx, model_sga, at = 1:200,#1:10*11,#0:120, 
+                              bylag = 1, cumul = TRUE, cen = 0)
+
+pred_sga.wf <- crosspred(cb1.wf, model_sga, at = 0:1, bylag = 1,
+                         cumul = TRUE, cen = 0)#, #at = 0:120,
+# bylag = 1, cen = 0)#, cumul = TRUE, cen = 0)
+
+pred_sga.pm25 <- crosspred(cb1.pm25, model_sga, at = 1:200, 
+                           bylag = 1, cumul = TRUE, cen = 0)
+
+
+
+# for PM = 1; there is no safe amount of exposure to inversion pollution during pregnancy
+fx_intx("1", "1", 1:38,
+        pred1.wf_pm25, pred1.wf, pred1.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0) |>
+  ggplot(aes(y = week, color = sig)) +
+  geom_point(aes(x = fx), size = 1) +
+  geom_linerange(aes(xmin = ll, xmax = hh)) +
+  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+  labs(title = expression(
+    paste("WF-specific PM"[2.5], 
+          " = 1 µg/m" ^ 3, 
+          " (AQI = 6) and preterm birth")),
+    # subtitle = "",
+    x = "OR of \npreterm \nbirth", 
+    y = "Gestational week of exposure") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_hline(yintercept = seq(from = 5, to = 35, by = 5), linetype = "dotted", alpha = 0.5) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+
+# for PM = 9
+res_pm_9 <- fx_intx("9", "1", 1:38,
+                    pred1.wf_pm25, pred1.wf, pred1.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+
+plt_9 <- res_pm_9 |>
+  ggplot(aes(y = week, color = sig)) +
+  geom_point(aes(x = fx), size = 1) +
+  geom_linerange(aes(xmin = ll, xmax = hh)) +
+  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+  labs(title = expression(
+    paste("WF-specific PM"[2.5], 
+          " = 9 µg/m" ^ 3, 
+          " (AQI = 50)")),# and preterm birth")),
+    # subtitle = "",
+    x = "OR of \npreterm \nbirth", 
+    y = "Gestational week of exposure") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+             linetype = "dotted", alpha = 0.5) +
+  xlim(0.8, 1.7) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+
+
+fx_intx("22", "1", 1:38,
+                    pred1.wf_pm25, pred1.wf, pred1.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0) |>
+  ggplot(aes(y = week, color = sig)) +
+  geom_point(aes(x = fx), size = 1) +
+  geom_linerange(aes(xmin = ll, xmax = hh)) +
+  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+  labs(title = expression(
+    paste("WF-specific PM"[2.5], 
+          " = 22 µg/m" ^ 3, 
+          " (AQI = 70)")),# and preterm birth")),
+    # subtitle = "",
+    x = "OR of \npreterm \nbirth", 
+    y = "Gestational week of exposure") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+             linetype = "dotted", alpha = 0.5) +
+  xlim(0.8, 1.7) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+
+
+# for PM = 35
+res_pm_35 <- fx_intx("35", "1", 1:38,
+                    pred1.wf_pm25, pred1.wf, pred1.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+
+plt_35 <- res_pm_35 |>
+  ggplot(aes(y = week, color = sig)) +
+  geom_point(aes(x = fx), size = 1) +
+  geom_linerange(aes(xmin = ll, xmax = hh)) +
+  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+  labs(title = expression(
+    paste("WF-specific PM"[2.5], 
+          " = 35 µg/m" ^ 3, 
+          " (AQI = 100)")),# and preterm birth")),
+    # subtitle = "",
+    x = "OR of \npreterm \nbirth", 
+    y = "Gestational week of exposure") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+             linetype = "dotted", alpha = 0.5) +
+  xlim(0.8, 1.7) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+
+# for PM = 55
+res_pm_55 <- fx_intx("55", "1", 1:38,
+                    pred1.wf_pm25, pred1.wf, pred1.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+
+plt_55 <- res_pm_55 |>
+  ggplot(aes(y = week, color = sig)) +
+  geom_point(aes(x = fx), size = 1) +
+  geom_linerange(aes(xmin = ll, xmax = hh)) +
+  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+  labs(title = expression(
+    paste("WF-specific PM"[2.5], 
+          " = 55 µg/m" ^ 3, 
+          " (AQI = 150)")),# and preterm birth")),
+    # subtitle = "",
+    x = "OR of \npreterm \nbirth", 
+    y = "Gestational week of exposure") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+             linetype = "dotted", alpha = 0.5) +
+  xlim(0.8, 1.7) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+
+# for PM = 110
+res_pm_200 <- fx_intx("200", "1", 1:38,
+                      pred1.wf_pm25, pred1.wf, pred1.pm25) |>
+  mutate(sig = ifelse(ll > 1, "yes", "no")) |>
+  filter(week != 0)
+
+plt_200 <- res_pm_200 |>
+  ggplot(aes(y = week, color = sig)) +
+  geom_point(aes(x = fx), size = 1) +
+  geom_linerange(aes(xmin = ll, xmax = hh)) +
+  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+  labs(title = expression(
+    paste("Inversion-specific PM"[2.5], 
+          " = 200 µg/m" ^ 3, 
+          " (AQI = 189)")),# and preterm birth")),
+    # subtitle = "",
+    x = "OR of \npreterm \nbirth", 
+    y = "Gestational week of exposure") +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+             linetype = "dotted", alpha = 0.5) +
+  # xlim(0.35, 2.25) +
+  coord_flip() +
+  theme_classic() +
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
+
+
+library(ggpubr)
+ggarrange(plt_55,# + labs(x = NULL), 
+          plt_35, 
+          plt_9, nrow = 3)#, 
+          #plt_200)
+
+1.266830 / 0.9632169
+
+exp(log(1.158880) - log(1.0114504))
+
+exp(log(1.266830) - log(0.9632169))
+
+
+```
+
+## p-values
+
+### rounded p-values
+
+```{r}
+
+### here's a little workaround; assuming we would round the p-values anyways, we can just calculate the crosspreds for a range of CI levels
+ci_levels <- seq(0.95, 0.999, by = 0.001)
+
+p_ci_calculations <- function(ci_level) {
+  
+  pred1.wf_pm25_cis <- crosspred(cb1.intx, model_pi, at = 1:200,
+                                  bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.wf_cis <- crosspred(cb1.wf, model_pi, at = 0:1, bylag = 1,
+                             cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.pm25_cis <- crosspred(cb1.pm25, model_pi, at = 1:200,
+                              bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  # total fx at different levels
+  # pm = 9
+  pm_9 <- fx_intx("9", "1", 1:37,
+                  pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 35
+  pm_35 <- fx_intx("35", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 55
+  pm_55 <- fx_intx("55", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 110
+  pm_110 <- fx_intx("110", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  # filter(ll >= 1)
+  
+  res <- rbind(data.frame(pm_9,
+                          pm25 = 9,
+                          pval = 1 - ci_level),
+               data.frame(pm_35,
+                          pm25 = 35,
+                          pval = 1 - ci_level),
+               data.frame(pm_55,
+                          pm25 = 55,
+                          pval = 1 - ci_level),
+               data.frame(pm_110,
+                          pm25 = 125,
+                          pval = 1 - ci_level),
+               data.frame(pm_110,
+                          pm25 = 175,
+                          pval = 1 - ci_level)) |>
+    mutate(outcome = "test") |>
+    filter(ll >= 1)
+  
+  rownames(res) <- NULL
+  
+  res
+  
+}
+
+# p_ci_calculations(0.5)
+# p_ci_calculations(0.5, model_pi)
+# 
+# 
+# # test once
+# # p_ci_calculations(0.95)
+# 
+# 
+# p_ci_calculations(0.5) |>
+#   slice_min(ll, n = 5)
+# 
+# # find the largest p-value
+# table(p_ci_calculations(c(0.05, 0.06))$pval)
+# 
+# there should be 152
+
+
+# apply across a small range of p-values
+# do.call(rbind, lapply(c(0.95, 0.96), p_ci_calculations))
+
+# apply across full range of p-values, get groupwise min p-value
+# ci_levels <- seq(0.95, 0.999, by = 0.0001)
+# models <- list(model_pi, model_ptb, model_sga)
+
+# pval_data <- expand.grid(ci_levels = seq(0.95, 0.96, by = 0.01),#, by = 0.0001),
+#                          models = c(model_pi, model_ptb, model_sga))
+
+ci_levels <- seq(0.95, 0.9999, by = 0.0001)
+# ci_levels <- c(seq(0.999, 0.9999, by = 0.0001),
+#                seq(0.99, 0.999, by = 0.001), 
+#                seq(0.95, 0.99, by = 0.01))
+
+# pval_data <- expand.grid(ci_levels = ci_levels, #seq(0.95, 0.96, by = 0.01),#, by = 0.0001),
+#                          models = c(model_pi, model_ptb, model_sga))
+
+# pval_data <- data.table::CJ(ci_levels = ci_levels, #seq(0.95, 0.96, by = 0.01),#, by = 0.0001),
+#                             models = list(model_pi, model_ptb, model_sga),
+#                             sorted = FALSE)
+# 
+# system.time(
+#   p_ci_calculations(pval_data[1,]$ci_levels,
+#                     pval_data[1,]$models)
+# 
+# p_ci_calculations(pval_data[1,]$ci_levels,
+#                   pval_data[1,]$models)
+
+# parallelize
+library(parallel)
+num_cores <- detectCores() - 6
+
+system.time(
+  p_results <- mclapply(ci_levels, p_ci_calculations,#FUN = function(x) 
+  # p_ci_calculations(ci_levels = ci_levels), #pval_data[x,]$ci_levels),
+                    # model = pval_data[x,]$models),
+  mc.cores = num_cores)
+)
+
+# p_results <- lapply(1:nrow(pval_data), function(x) 
+#   p_ci_calculations(ci_levels = pval_data[x,]$ci_levels,
+#                     model = pval_data[x,]$models))
+# started at ~ 15:45
+ci_results <- do.call(rbind, p_results)
+# system.time(
+#   ci_results <- do.call(rbind, p_results)
+# )
+
+# ci_results <- do.call(rbind, lapply(list(ci_levels, models), p_ci_calculations))
+
+p_results <- ci_results |>
+  group_by(week, pm25) |>
+  slice_min(pval, n = 1) |>
+  select(week, pm25, fx, pval)
+
+# we take the maximum CI width at which the effect is statistically significant to be the rounded p-value
+# this only contains p-values which are <0.05
+p_results
+
+# p-values for pm25 = 9
+p_results |>
+  filter(pm25 == 9)
+
+# p-values for pm25 = 35
+p_results |>
+  filter(pm25 == 35)
+
+# p-values for pm25 = 55
+p_results |>
+  filter(pm25 == 55)
+
+# p-values for pm25 = 110
+p_results |>
+  filter(pm25 == 110)
+
+```
+
+
+
+
+
+## table 2
+
+```{r}
+
+rbind(res_pm_9 |>
+        mutate(pm25 = 9),
+      res_pm_35 |>
+        mutate(pm25 = 35),
+      res_pm_55 |>
+        mutate(pm25 = 55),
+      res_pm_110 |>
+        mutate(pm25 = 110)) |>
+  merge(p_results |>
+          select(!fx), 
+        by = c("week", "pm25"), all.x = TRUE)
+
+p_results
+
+head(birth_inv_20$)
+
+exphist(30, 3:7, 8, fill=0)
+
+```
+
+
+
+```{r}
+
+# get predictions for each exposure-lag
+pred1.wf_pm25 <- crosspred(cb1.intx, model1, at = 1:11*10,#0:120, 
+                       bylag = 1, cumul = TRUE, cen = 0)
+# plot(pred1.inv_pm25)
+
+rr_mat <- pred1.wf_pm25$matRRfit |> #cplist$`late`$matfit |> #pred1.wf_days$matRRfit |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         RR = value) |>
+  # mutate(RR = exp(RR)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+ci_lo_mat <- pred1.wf_pm25$matRRlow |> #cplist$`late`$matlow |>#pred1.wf_days$matRRlow |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         CI_lo = value) |>
+  # mutate(CI_lo = exp(CI_lo)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+ci_hi_mat <- pred1.wf_pm25$matRRhigh |> #cplist$`late`$mathigh |>#pred1.wf_days$matRRhigh |>
+  reshape2::melt() |>
+  rename(exposure = Var1,
+         lag = Var2,
+         CI_hi = value) |>
+  # mutate(CI_hi = exp(CI_hi)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag)))
+
+p_val_mat <- pred1.wf_pm25$matse |> #cplist$`late`$mathigh |>#pred1.wf_days$matRRhigh |>
+  reshape2::melt() |>
+  cbind(rr_mat$RR) |>
+  rename(exposure = Var1,
+         lag = Var2,
+         se = value,
+         RR = `rr_mat$RR`) |>
+  mutate(z_value = log(RR) / se,
+         p_value = 2 * pnorm(-abs(z_value))) |>
+  # mutate(CI_hi = exp(CI_hi)) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  # rename(exposure = Var1,
+  #        lag = Var2,
+  #        RR = value) |>
+  mutate(lag = as.numeric(gsub("lag", "", lag))) |>
+  select(!RR)
+
+
+
+rr <- merge(rr_mat, ci_lo_mat, by = c("exposure", "lag")) |>
+  merge(ci_hi_mat, by = c("exposure", "lag")) |>
+  merge(p_val_mat, by = c("exposure", "lag"))
+
+rr <- rr |>
+  filter(lag != 0)
+
+table(rr$p_value < 0.00001)
+
+# statistical significance, for outline
+# rr$significant <- case_when(rr$CI_lo > 1 & rr$CI_hi > 1 ~ "significant",
+                            # rr$CI_lo < 1 & rr$CI_hi < 1 ~ "significant")
+# rr$significant <- ifelse(is.na(rr$significant), "not", "significant")
+
+rr$significant <- ifelse(rr$p_value > 0.001, "not", "significant")
+rr$significant <- ifelse(rr$RR > 1, rr$significant, "not")
+rr$significant <- ifelse(rr$exposure == 10, "not", rr$significant)
+
+# rr_significant <- rr |>
+#   filter(significant == "significant")
+
+rr_plot <- ggplot(rr, aes(x = lag, y = exposure, fill = RR)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.49, 1.78)) +
+  geom_tile(data = rr[which(rr$significant == "significant"),],
+            fill = NA, color = "orangered", size = 1) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Odds of Preterm Birth", 
+       x = "Gestational Week",
+       y = "Inversion-specific PM2.5 exposure") +
+  theme(text = element_text(colour = "black",
+                            family = "Century Gothic",
+                            face = "plain"))
+
+ci_lo_plot <- ggplot(ci_lo_mat, aes(x = lag, y = exposure, fill = CI_lo)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.49, 1.78)) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Lower 95% CI", 
+       x = "",
+       y = "", fill = "") +
+  theme(text = element_text(colour = "black",
+                            family = "Century Gothic",
+                            face = "plain"))
+
+ci_hi_plot <- ggplot(ci_hi_mat, aes(x = lag, y = exposure, fill = CI_hi)) +
+  geom_tile(colour = "gray70", linewidth = 0.0) +
+  scale_fill_gradient2(low = "royalblue1", mid = "white", 
+                       high = "orangered", midpoint = 1,
+                       limits = c(0.49, 1.78)) +
+  theme_minimal() +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  labs(title = "Upper 95% CI", 
+       x = "",
+       y = "", fill = "") +
+  theme(text = element_text(colour = "black",
+                            family = "Century Gothic",
+                            face = "plain"))
+
+
+library(patchwork)
+
+rr_plot + (ci_hi_plot / ci_lo_plot)+# / plot_spacer()) +
+  plot_layout(widths = c(2.5, 1), guides = "collect")
+
+
+```
+
+
 
 
 
