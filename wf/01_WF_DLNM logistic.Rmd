@@ -636,11 +636,91 @@ library(ggpubr)
 # ggarrange(plt_pi, plt_ptb, plt_sga, nrow = 1)
 
 # alternatively
-annotate_figure(ggarrange(plt_pi, plt_ptb, plt_sga, nrow = 1),
+annotate_figure(ggarrange(plt_pi, plt_ptb, plt_sga, nrow = 1)
                 top = text_grob("Odds ratios across WF-related PM  values", 
                                 color = "black", face = "bold", size = 14,
                                 hjust = 0, x = 0.06))
 # exported as 12 x 12
+
+##### for poster only:
+library(extrafont)
+
+plt_fx_poster <- function(res_data_9, res_data_35,
+                   res_data_55, res_data_125,
+                   # res_data_175, 
+                   outcome, outcome_abbreviation) {
+  
+  clean_labels <- c("9" = 'PM2.5 = 9 \n(AQI = 50, "Healthy")',
+                    "35" = 'PM2.5 = 35 \n(AQI = 100, "Moderate")',
+                    "55" = 'PM2.5 = 55 \n(AQI = 150, "Unhealthy for Sensitive Groups")',
+                    "125" = 'PM2.5 = 125 \n(AQI = 200, "Unhealthy")')#,
+                    # "175" = 'PM  = 175 (AQI = 250), "Very Unhealthy"')
+  
+  rbind(res_data_9,
+        res_data_35,
+        res_data_55,
+        res_data_125) |> #,
+        # res_data_175) |>
+    mutate(pm = factor(pm, levels = c(#175, 
+                                      125, 55, 35, 9))) |>
+    ggplot(aes(y = week, color = sig)) +
+    geom_point(aes(x = fx), size = 1) +
+    geom_linerange(aes(xmin = ll, xmax = hh)) +
+    scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+    labs(title = outcome,
+           #paste0("Odds Ratios of", outcome, " across WF-related PM"),
+      # subtitle = "",
+      x = "", 
+      y = "Gestational week of exposure") +
+    geom_vline(xintercept = 1, linetype = "dashed") +
+    geom_hline(yintercept = seq(from = 5, to = 35, by = 5), 
+               linetype = "dotted", alpha = 0.5) +
+    geom_vline(xintercept = seq(from = 1, to = 2.5, by = 0.5),
+               linetype = "dotted") +
+    geom_vline(xintercept = 0.5, linetype = "dotted") +
+    scale_x_log10(limits = c(0.3, 2.6), 
+                  breaks = c(1, 2)) +
+    coord_flip() +
+    theme_classic() +
+    theme(axis.title.y = element_text(angle = 0, vjust = 0.5),
+          text = element_text(colour = "black",
+                            family = "Century Gothic",
+                            face = "plain")) +
+    facet_wrap(~ pm, ncol = 1, labeller = labeller(pm = clean_labels))
+  
+}
+
+### creating plots for each outcome
+plt_pi_poster <- plt_fx_poster(res_pi_9, res_pi_35,
+                 res_pi_55, res_pi_125,
+                 # res_pi_175, 
+                 " Placental insufficiency", "PI")
+
+plt_ptb_poster <- plt_fx_poster(res_ptb_9, res_ptb_35,
+                  res_ptb_55, res_ptb_125,
+                  # res_ptb_175, 
+                  " Preterm birth", "PTB")
+
+plt_sga_poster <- plt_fx_poster(res_sga_9, res_sga_35,
+                  res_sga_55, res_sga_125,
+                  # res_sga_175, 
+                  " Small-for-gestational-age", "SGA")
+
+annotate_figure(ggarrange(plt_pi_poster, 
+                          plt_ptb_poster, 
+                          plt_sga_poster, nrow = 1),
+                top = text_grob("Odds ratios across WF-related PM  values", 
+                                color = "black", face = "bold", size = 14,
+                                hjust = 0, x = 0.06))
+
+# results for poster
+res_pi_125 |> 
+  slice_max(fx)
+res_ptb_125 |> 
+  filter(sig == "yes") |>
+  slice_max(fx)
+res_sga_125 |> 
+  slice_max(fx)
 
 ```
 
@@ -1065,11 +1145,6 @@ annotate_figure(ggarrange(pi_comparison,
 
 
 
-
-
-
-
-
 rbind(res_200, res_55, res_35, res_9) |>
   # group_by(week, level) |>
   filter(sig.x == "yes") |>
@@ -1304,6 +1379,7 @@ exp(log(1.266830) - log(0.9632169))
 ### rounded p-values
 
 ```{r}
+### for placental insufficiency
 
 ### here's a little workaround; assuming we would round the p-values anyways, we can just calculate the crosspreds for a range of CI levels
 ci_levels <- seq(0.95, 0.999, by = 0.001)
@@ -1333,7 +1409,9 @@ p_ci_calculations <- function(ci_level) {
                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
     # filter(ll >= 1)
   # pm = 110
-  pm_110 <- fx_intx("110", "1", 1:37,
+  pm_125 <- fx_intx("125", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  pm_175 <- fx_intx("175", "1", 1:37,
                     pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
   # filter(ll >= 1)
   
@@ -1346,10 +1424,10 @@ p_ci_calculations <- function(ci_level) {
                data.frame(pm_55,
                           pm25 = 55,
                           pval = 1 - ci_level),
-               data.frame(pm_110,
+               data.frame(pm_125,
                           pm25 = 125,
                           pval = 1 - ci_level),
-               data.frame(pm_110,
+               data.frame(pm_175,
                           pm25 = 175,
                           pval = 1 - ci_level)) |>
     mutate(outcome = "test") |>
@@ -1452,11 +1530,268 @@ p_results |>
 
 # p-values for pm25 = 110
 p_results |>
-  filter(pm25 == 110)
+  filter(pm25 == 125)
+
+
+# for poster
+p_results |> as.data.frame() |> filter(pm25 == 125) |> slice_max(fx)
+
+# full PI results w/ p-value and CI
+
+res_pi_full <- rbind(res_pi_9,
+                     res_pi_35,
+                     res_pi_55,
+                     res_pi_125,
+                     res_pi_175) |>
+  merge(p_results, by.x = c("pm", "week"),
+        by.y = c("pm25", "week")) |>
+  select(pm, week, fx.x, ll, hh, pval, sig) |>
+  rename(or = fx.x) |>
+  mutate(pm = factor(pm, levels = c(9, 35, 55, 125, 175))) |>
+  arrange(pm, week)
+
+write.csv(res_pi_full, "manuscript_wf/res_pi_full.csv", row.names = FALSE)
+
+```
+
+```{r}
+#### for ptb
+
+p_ci_calculations <- function(ci_level) {
+  
+  pred1.wf_pm25_cis <- crosspred(cb1.intx, model_ptb, at = 1:200,
+                                  bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.wf_cis <- crosspred(cb1.wf, model_ptb, at = 0:1, bylag = 1,
+                             cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.pm25_cis <- crosspred(cb1.pm25, model_ptb, at = 1:200,
+                              bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  # total fx at different levels
+  # pm = 9
+  pm_9 <- fx_intx("9", "1", 1:37,
+                  pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 35
+  pm_35 <- fx_intx("35", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 55
+  pm_55 <- fx_intx("55", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 110
+  pm_125 <- fx_intx("125", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  pm_175 <- fx_intx("175", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  # filter(ll >= 1)
+  
+  res <- rbind(data.frame(pm_9,
+                          pm25 = 9,
+                          pval = 1 - ci_level),
+               data.frame(pm_35,
+                          pm25 = 35,
+                          pval = 1 - ci_level),
+               data.frame(pm_55,
+                          pm25 = 55,
+                          pval = 1 - ci_level),
+               data.frame(pm_125,
+                          pm25 = 125,
+                          pval = 1 - ci_level),
+               data.frame(pm_175,
+                          pm25 = 175,
+                          pval = 1 - ci_level)) |>
+    mutate(outcome = "test") |>
+    filter(ll >= 1)
+  
+  rownames(res) <- NULL
+  
+  res
+  
+}
+
+ci_levels <- seq(0.95, 0.9999, by = 0.0001)
+
+library(parallel)
+num_cores <- detectCores() - 6
+
+system.time(
+  p_results_ptb <- mclapply(ci_levels, p_ci_calculations,
+  mc.cores = num_cores)
+)
+
+ci_results_ptb <- do.call(rbind, p_results_ptb)
+
+p_results_ptb <- ci_results_ptb |>
+  group_by(week, pm25) |>
+  slice_min(pval, n = 1) |>
+  select(week, pm25, fx, pval)
+
+# we take the maximum CI width at which the effect is statistically significant to be the rounded p-value
+# this only contains p-values which are <0.05
+p_results_ptb
+
+# p-values for pm25 = 9
+p_results_ptb |>
+  filter(pm25 == 9)
+
+# p-values for pm25 = 35
+p_results_ptb |>
+  filter(pm25 == 35)
+
+# p-values for pm25 = 55
+p_results_ptb |>
+  filter(pm25 == 55)
+
+# p-values for pm25 = 110
+p_results_ptb |>
+  filter(pm25 == 125)
+
+
+# for poster
+p_results_ptb |> 
+  as.data.frame() |> 
+  filter(pm25 == 125) |> 
+  slice_max(fx)
+
+# for manuscript
+res_ptb_full <- rbind(res_ptb_9,
+                      res_ptb_35,
+                      res_ptb_55,
+                      res_ptb_125,
+                      res_ptb_175) |>
+  merge(p_results, by.x = c("pm", "week"),
+        by.y = c("pm25", "week")) |>
+  select(pm, week, fx.x, ll, hh, pval, sig) |>
+  rename(or = fx.x) |>
+  mutate(pm = factor(pm, levels = c(9, 35, 55, 125, 175))) |>
+  arrange(pm, week)
+
+write.csv(res_ptb_full, "manuscript_wf/res_ptb_full.csv", row.names = FALSE)
 
 ```
 
 
+```{r}
+#### for sga
+
+p_ci_calculations <- function(ci_level) {
+  
+  pred1.wf_pm25_cis <- crosspred(cb1.intx, model_sga, at = 1:200,
+                                  bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.wf_cis <- crosspred(cb1.wf, model_sga, at = 0:1, bylag = 1,
+                             cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.pm25_cis <- crosspred(cb1.pm25, model_sga, at = 1:200,
+                              bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  # total fx at different levels
+  # pm = 9
+  pm_9 <- fx_intx("9", "1", 1:37,
+                  pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 35
+  pm_35 <- fx_intx("35", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 55
+  pm_55 <- fx_intx("55", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 110
+  pm_125 <- fx_intx("125", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  pm_175 <- fx_intx("175", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  # filter(ll >= 1)
+  
+  res <- rbind(data.frame(pm_9,
+                          pm25 = 9,
+                          pval = 1 - ci_level),
+               data.frame(pm_35,
+                          pm25 = 35,
+                          pval = 1 - ci_level),
+               data.frame(pm_55,
+                          pm25 = 55,
+                          pval = 1 - ci_level),
+               data.frame(pm_125,
+                          pm25 = 125,
+                          pval = 1 - ci_level),
+               data.frame(pm_175,
+                          pm25 = 175,
+                          pval = 1 - ci_level)) |>
+    mutate(outcome = "test") |>
+    filter(ll >= 1)
+  
+  rownames(res) <- NULL
+  
+  res
+  
+}
+
+ci_levels <- seq(0.95, 0.9999, by = 0.0001)
+
+library(parallel)
+num_cores <- detectCores() - 6
+
+system.time(
+  p_results_sga <- mclapply(ci_levels, p_ci_calculations,
+  mc.cores = num_cores)
+)
+
+ci_results_sga <- do.call(rbind, p_results_sga)
+
+p_results_sga <- ci_results_sga |>
+  group_by(week, pm25) |>
+  slice_min(pval, n = 1) |>
+  select(week, pm25, fx, pval)
+
+# we take the maximum CI width at which the effect is statistically significant to be the rounded p-value
+# this only contains p-values which are <0.05
+p_results_sga
+
+# p-values for pm25 = 9
+p_results_sga |>
+  filter(pm25 == 9)
+
+# p-values for pm25 = 35
+p_results_sga |>
+  filter(pm25 == 35)
+
+# p-values for pm25 = 55
+p_results_sga |>
+  filter(pm25 == 55)
+
+# p-values for pm25 = 110
+p_results_sga |>
+  filter(pm25 == 125)
+
+
+# for poster
+p_results_sga |> 
+  as.data.frame() |> 
+  filter(pm25 == 125) |> 
+  slice_max(fx)
+
+# for manuscript
+res_sga_full <- rbind(res_sga_9,
+                      res_sga_35,
+                      res_sga_55,
+                      res_sga_125,
+                      res_sga_175) |>
+  merge(p_results, by.x = c("pm", "week"),
+        by.y = c("pm25", "week")) |>
+  select(pm, week, fx.x, ll, hh, pval, sig) |>
+  rename(or = fx.x) |>
+  mutate(pm = factor(pm, levels = c(9, 35, 55, 125, 175))) |>
+  arrange(pm, week)
+
+write.csv(res_sga_full, "manuscript_wf/res_sga_full.csv", row.names = FALSE)
+
+```
 
 
 
