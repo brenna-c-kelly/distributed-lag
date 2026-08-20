@@ -969,6 +969,21 @@ pi_comparison <- rbind(res_pi_9_wfnwf,
   theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +
   guides(color = guide_legend(reverse = TRUE, title = "PM2.5 level"))
 
+# save results
+rbind(res_pi_9_wfnwf,
+      res_pi_35_wfnwf,
+      res_pi_55_wfnwf,
+      res_pi_125_wfnwf,
+      res_pi_175_wfnwf) |>
+  mutate(level = as.factor(level),
+         diff = diff*100) |>
+  rename(ll_wf = ll.x, ll_not_wf = ll.y,
+         hh_wf = hh.x, hh_not_wf = hh.y,
+         fx_wf = fx.x, fx_not_wf = fx.y,
+         sig_wf = sig.x, sig_not_wf = sig.y) |>
+  select(!level) |>
+  write.csv("manuscript_wf/wf_nwf_comparison_pi.csv", row.names = FALSE)
+  
 
 #### for preterm birth
 # for PM = 9
@@ -1043,6 +1058,21 @@ ptb_comparison <- rbind(res_ptb_9_wfnwf,
   theme_classic() +
   theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +
   guides(color = guide_legend(reverse = TRUE, title = "PM2.5 level"))
+
+# save results
+rbind(res_ptb_9_wfnwf,
+      res_ptb_35_wfnwf,
+      res_ptb_55_wfnwf,
+      res_ptb_125_wfnwf,
+      res_ptb_175_wfnwf) |>
+  mutate(level = as.factor(level),
+         diff = diff*100) |>
+  rename(ll_wf = ll.x, ll_not_wf = ll.y,
+         hh_wf = hh.x, hh_not_wf = hh.y,
+         fx_wf = fx.x, fx_not_wf = fx.y,
+         sig_wf = sig.x, sig_not_wf = sig.y) |>
+  select(!level) |>
+  write.csv("manuscript_wf/wf_nwf_comparison_ptb.csv", row.names = FALSE)
 
 
 #### for SGA
@@ -1120,6 +1150,21 @@ sga_comparison <- rbind(res_sga_9_wfnwf,
   theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +
   guides(color = guide_legend(reverse = TRUE, title = "PM2.5 level"))
 
+# save results
+rbind(res_sga_9_wfnwf,
+      res_sga_35_wfnwf,
+      res_sga_55_wfnwf,
+      res_sga_125_wfnwf,
+      res_sga_175_wfnwf) |>
+  mutate(level = as.factor(level),
+         diff = diff*100) |>
+  rename(ll_wf = ll.x, ll_not_wf = ll.y,
+         hh_wf = hh.x, hh_not_wf = hh.y,
+         fx_wf = fx.x, fx_not_wf = fx.y,
+         sig_wf = sig.x, sig_not_wf = sig.y) |>
+  select(!level) |>
+  write.csv("manuscript_wf/wf_nwf_comparison_sga.csv", row.names = FALSE)
+
 
 ggarrange(pi_comparison, 
           ptb_comparison, 
@@ -1143,37 +1188,32 @@ annotate_figure(ggarrange(pi_comparison,
 
 # exported as 12 x 4
 
-
-
-rbind(res_200, res_55, res_35, res_9) |>
-  # group_by(week, level) |>
-  filter(sig.x == "yes") |>
-  slice_max(fx.x)
-  # summarize(max = max(diff))
-
-
-
-res_55 |>
-  ggplot(aes(y = week, color = sig.x)) +
-  geom_point(aes(x = diff), size = 1) +
-  # geom_linerange(aes(xmin = ll, xmax = hh)) +
-  scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
-  labs(title = expression(
-    paste("non-WF PM"[2.5],
-          " = 9 µg/m" ^ 3,
-          " (AQI = 50)")),# and preterm birth")),
-    # subtitle = "",
-    x = "OR of \npreterm \nbirth",
-    y = "Gestational week of exposure") +
-  geom_vline(xintercept = 1, linetype = "dashed") +
-  geom_hline(yintercept = seq(from = 5, to = 35, by = 5),
-             linetype = "dotted", alpha = 0.5) +
-  coord_flip() +
-  theme_classic() +
-  theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
-
-
-
+# 
+# 
+# rbind(res_200, res_55, res_35, res_9) |>
+#   # group_by(week, level) |>
+#   filter(sig.x == "yes") |>
+#   slice_max(fx.x)
+#   # summarize(max = max(diff))
+# 
+# res_55 |>
+#   ggplot(aes(y = week, color = sig.x)) +
+#   geom_point(aes(x = diff), size = 1) +
+#   # geom_linerange(aes(xmin = ll, xmax = hh)) +
+#   scale_color_manual(values=c("black", "#fa2c0c"), guide = "none") +
+#   labs(title = expression(
+#     paste("non-WF PM"[2.5],
+#           " = 9 µg/m" ^ 3,
+#           " (AQI = 50)")),# and preterm birth")),
+#     # subtitle = "",
+#     x = "OR of \npreterm \nbirth",
+#     y = "Gestational week of exposure") +
+#   geom_vline(xintercept = 1, linetype = "dashed") +
+#   geom_hline(yintercept = seq(from = 5, to = 35, by = 5),
+#              linetype = "dotted", alpha = 0.5) +
+#   coord_flip() +
+#   theme_classic() +
+#   theme(axis.title.y = element_text(angle = 0, vjust = 0.5))
 
 ```
 
@@ -1385,16 +1425,16 @@ exp(log(1.266830) - log(0.9632169))
 ci_levels <- seq(0.95, 0.999, by = 0.001)
 
 p_ci_calculations <- function(ci_level) {
-  
+
   pred1.wf_pm25_cis <- crosspred(cb1.intx, model_pi, at = 1:200,
                                   bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
-  
+
   pred1.wf_cis <- crosspred(cb1.wf, model_pi, at = 0:1, bylag = 1,
                              cumul = TRUE, cen = 0, ci.level = ci_level)
-  
+
   pred1.pm25_cis <- crosspred(cb1.pm25, model_pi, at = 1:200,
                               bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
-  
+
   # total fx at different levels
   # pm = 9
   pm_9 <- fx_intx("9", "1", 1:37,
@@ -1414,7 +1454,7 @@ p_ci_calculations <- function(ci_level) {
   pm_175 <- fx_intx("175", "1", 1:37,
                     pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
   # filter(ll >= 1)
-  
+
   res <- rbind(data.frame(pm_9,
                           pm25 = 9,
                           pval = 1 - ci_level),
@@ -1432,27 +1472,27 @@ p_ci_calculations <- function(ci_level) {
                           pval = 1 - ci_level)) |>
     mutate(outcome = "test") |>
     filter(ll >= 1)
-  
+
   rownames(res) <- NULL
-  
+
   res
-  
+
 }
 
 # p_ci_calculations(0.5)
 # p_ci_calculations(0.5, model_pi)
-# 
-# 
+#
+#
 # # test once
 # # p_ci_calculations(0.95)
-# 
-# 
+#
+#
 # p_ci_calculations(0.5) |>
 #   slice_min(ll, n = 5)
-# 
+#
 # # find the largest p-value
 # table(p_ci_calculations(c(0.05, 0.06))$pval)
-# 
+#
 # there should be 152
 
 
@@ -1468,7 +1508,7 @@ p_ci_calculations <- function(ci_level) {
 
 ci_levels <- seq(0.95, 0.9999, by = 0.0001)
 # ci_levels <- c(seq(0.999, 0.9999, by = 0.0001),
-#                seq(0.99, 0.999, by = 0.001), 
+#                seq(0.99, 0.999, by = 0.001),
 #                seq(0.95, 0.99, by = 0.01))
 
 # pval_data <- expand.grid(ci_levels = ci_levels, #seq(0.95, 0.96, by = 0.01),#, by = 0.0001),
@@ -1477,11 +1517,11 @@ ci_levels <- seq(0.95, 0.9999, by = 0.0001)
 # pval_data <- data.table::CJ(ci_levels = ci_levels, #seq(0.95, 0.96, by = 0.01),#, by = 0.0001),
 #                             models = list(model_pi, model_ptb, model_sga),
 #                             sorted = FALSE)
-# 
+#
 # system.time(
 #   p_ci_calculations(pval_data[1,]$ci_levels,
 #                     pval_data[1,]$models)
-# 
+#
 # p_ci_calculations(pval_data[1,]$ci_levels,
 #                   pval_data[1,]$models)
 
@@ -1490,13 +1530,13 @@ library(parallel)
 num_cores <- detectCores() - 6
 
 system.time(
-  p_results <- mclapply(ci_levels, p_ci_calculations,#FUN = function(x) 
+  p_results <- mclapply(ci_levels, p_ci_calculations,#FUN = function(x)
   # p_ci_calculations(ci_levels = ci_levels), #pval_data[x,]$ci_levels),
                     # model = pval_data[x,]$models),
   mc.cores = num_cores)
 )
 
-# p_results <- lapply(1:nrow(pval_data), function(x) 
+# p_results <- lapply(1:nrow(pval_data), function(x)
 #   p_ci_calculations(ci_levels = pval_data[x,]$ci_levels,
 #                     model = pval_data[x,]$models))
 # started at ~ 15:45
@@ -1544,7 +1584,7 @@ res_pi_full <- rbind(res_pi_9,
                      res_pi_125,
                      res_pi_175) |>
   merge(p_results, by.x = c("pm", "week"),
-        by.y = c("pm25", "week")) |>
+        by.y = c("pm25", "week"), all.x = TRUE) |>
   select(pm, week, fx.x, ll, hh, pval, sig) |>
   rename(or = fx.x) |>
   mutate(pm = factor(pm, levels = c(9, 35, 55, 125, 175))) |>
@@ -1662,8 +1702,8 @@ res_ptb_full <- rbind(res_ptb_9,
                       res_ptb_55,
                       res_ptb_125,
                       res_ptb_175) |>
-  merge(p_results, by.x = c("pm", "week"),
-        by.y = c("pm25", "week")) |>
+  merge(p_results_ptb, by.x = c("pm", "week"),
+        by.y = c("pm25", "week"), all.x = TRUE) |>
   select(pm, week, fx.x, ll, hh, pval, sig) |>
   rename(or = fx.x) |>
   mutate(pm = factor(pm, levels = c(9, 35, 55, 125, 175))) |>
@@ -1723,7 +1763,7 @@ p_ci_calculations <- function(ci_level) {
                data.frame(pm_175,
                           pm25 = 175,
                           pval = 1 - ci_level)) |>
-    mutate(outcome = "test") |>
+    mutate(outcome = "sga") |>
     filter(ll >= 1)
   
   rownames(res) <- NULL
@@ -1748,6 +1788,11 @@ p_results_sga <- ci_results_sga |>
   group_by(week, pm25) |>
   slice_min(pval, n = 1) |>
   select(week, pm25, fx, pval)
+
+ci_results_sga |>
+  group_by(week, pm25) |>
+  slice_min(pval, n = 1) |>
+  filter(pm == 125)
 
 # we take the maximum CI width at which the effect is statistically significant to be the rounded p-value
 # this only contains p-values which are <0.05
@@ -1782,14 +1827,179 @@ res_sga_full <- rbind(res_sga_9,
                       res_sga_55,
                       res_sga_125,
                       res_sga_175) |>
-  merge(p_results, by.x = c("pm", "week"),
-        by.y = c("pm25", "week")) |>
+  merge(p_results_sga, by.x = c("pm", "week"),
+        by.y = c("pm25", "week"), all.x = TRUE) |>
   select(pm, week, fx.x, ll, hh, pval, sig) |>
   rename(or = fx.x) |>
   mutate(pm = factor(pm, levels = c(9, 35, 55, 125, 175))) |>
   arrange(pm, week)
 
 write.csv(res_sga_full, "manuscript_wf/res_sga_full.csv", row.names = FALSE)
+
+```
+
+
+```{r}
+### testing w/ SGA; I want p-values for the rest of em
+
+p_ci_calculations <- function(ci_level) {
+  
+  pred1.wf_pm25_cis <- crosspred(cb1.intx, model_sga, at = 1:200,
+                                  bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.wf_cis <- crosspred(cb1.wf, model_sga, at = 0:1, bylag = 1,
+                             cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  pred1.pm25_cis <- crosspred(cb1.pm25, model_sga, at = 1:200,
+                              bylag = 1, cumul = TRUE, cen = 0, ci.level = ci_level)
+  
+  # total fx at different levels
+  # pm = 9
+  pm_9 <- fx_intx("9", "1", 1:37,
+                  pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 35
+  pm_35 <- fx_intx("35", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 55
+  pm_55 <- fx_intx("55", "1", 1:37,
+                   pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis)# |>
+    # filter(ll >= 1)
+  # pm = 110
+  pm_125 <- fx_intx("125", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  pm_175 <- fx_intx("175", "1", 1:37,
+                    pred1.wf_pm25_cis, pred1.wf_cis, pred1.pm25_cis) #|>
+  # filter(ll >= 1)
+  
+  res <- rbind(data.frame(pm_9,
+                          pm25 = 9,
+                          pval = 1 - ci_level),
+               data.frame(pm_35,
+                          pm25 = 35,
+                          pval = 1 - ci_level),
+               data.frame(pm_55,
+                          pm25 = 55,
+                          pval = 1 - ci_level),
+               data.frame(pm_125,
+                          pm25 = 125,
+                          pval = 1 - ci_level),
+               data.frame(pm_175,
+                          pm25 = 175,
+                          pval = 1 - ci_level)) |>
+    mutate(outcome = "sga")# |>
+    # filter(ll >= 1)
+  
+  rownames(res) <- NULL
+  
+  res
+  
+}
+
+
+# if the p-value is smaller than 0.05, I'll get value to the nearest 0.0001
+# if the p-value is greater than 0.95, I'll get a value to the nearest 0.01
+# otherwise, I'll get a value to the nearest 0.01
+ci_levels <- c(seq(1 - 0.9999, 1 - 0.95, by = 0.01),
+               seq(0.01, 0.95, by = 0.01),
+               seq(0.95, 0.9999, by = 0.0001))
+# ci_levels <- c(seq(1 - 0.9999, 1 - 0.95, by = 0.01),
+#                seq(0.01, 0.95, by = 0.01),
+#                seq(0.95, 0.9999, by = 0.01))
+
+
+library(parallel)
+num_cores <- detectCores() - 6
+
+system.time(
+  p_results_sga_ll <- mclapply(ci_levels, p_ci_calculations,
+  mc.cores = num_cores)
+)
+
+ci_results_sga_ll <- do.call(rbind, p_results_sga_ll)
+
+head(ci_results_sga_ll)
+
+test <- ci_results_sga_ll |>
+  group_by(week, pm) |>
+  slice_min(pval, n = 1)
+
+
+# so I need to do slice_min for fx < 1 and slice_min for fx > 1?
+# and I'll also need high res CIs close to 0
+# do slice_max for fx < 1 and hh_95 < 1
+
+
+res_sga_ll <- rbind(res_sga_9,
+      res_sga_35,
+      res_sga_55,
+      res_sga_125,
+      res_sga_175) |>
+  merge(ci_results_sga_ll, by.x = c("pm", "week"),
+        by.y = c("pm", "week"), all.x = TRUE) |>
+  filter(fx.x < 1 & hh.x < 1) |>
+  filter(hh.y < 1) |>
+  group_by(pm, week) |>
+  slice_min(pval)
+
+res_sga_ns_hh <- rbind(res_sga_9,
+      res_sga_35,
+      res_sga_55,
+      res_sga_125,
+      res_sga_175) |>
+  merge(ci_results_sga_ll, by.x = c("pm", "week"),
+        by.y = c("pm", "week"), all.x = TRUE) |>
+  filter(fx.x > 1 & ll.x < 1) |>
+  filter(ll.y > 1) |> # only keep the pvals which a significant lower bound from the function above
+  group_by(pm, week) |>
+  slice_min(pval) # then take the narrowest alpha level
+
+# again, with fx < 1
+res_sga_ns_ll <- rbind(res_sga_9,
+      res_sga_35,
+      res_sga_55,
+      res_sga_125,
+      res_sga_175) |>
+  merge(ci_results_sga_ll, by.x = c("pm", "week"),
+        by.y = c("pm", "week"), all.x = TRUE) |>
+  filter(fx.x < 1 & hh.x > 1) |>
+  filter(hh.y < 1) |> # only keep the pvals which a significant lower bound from the function above
+  group_by(pm, week) |>
+  slice_min(pval) # then take the narrowest alpha level
+
+# now get the significant positive values
+res_sga_hh <- rbind(res_sga_9,
+                    res_sga_35,
+                    res_sga_55,
+                    res_sga_125,
+                    res_sga_175) |>
+  merge(ci_results_sga_ll, by.x = c("pm", "week"),
+        by.y = c("pm", "week"), all.x = TRUE) |>
+  filter(fx.x > 1 & ll.x > 1 & ll.y > 1) |>
+  group_by(pm, week) |>
+  slice_min(pval)
+
+# now put them all together, fingers crossed
+test <- rbind(res_sga_ll, 
+              res_sga_ns_hh, 
+              res_sga_ns_ll, 
+              res_sga_hh)
+
+test # i think... we did it!
+
+nrow(test)
+
+test |> 
+  arrange(pm, week)
+
+length(unique(paste(test$pm, test$week))) # we have 180 unique pm-week values — terrific
+
+
+
+# I'm predicting the values with different-sized confidence intervals
+# The largest CI size which doesn't cross the critical value is the pval (1 - CI%) that I use
+# For CIs which always cross the critical value, I need to use very narrow CIs
 
 ```
 
